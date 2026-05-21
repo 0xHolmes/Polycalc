@@ -2,25 +2,16 @@ import { useState, useCallback } from "react";
 
 const BASE = "/.netlify/functions";
 
-const isValidAddress = (a) => /^0x[0-9a-fA-F]{40}$/.test(a.trim());
-
-async function safeFetch(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
 export function useWalletData() {
-  const [status,   setStatus]   = useState("idle"); // idle | loading | partial | success | error
+  const [status,   setStatus]   = useState("idle");
   const [messages, setMessages] = useState([]);
   const [data,     setData]     = useState(null);
 
-  const addMsg = (msg) => setMessages((m) => [...m, msg]);
-
   const fetchWallet = useCallback(async (address) => {
-    if (!address || !isValidAddress(address)) {
+    const addr = address?.trim();
+    if (!addr || !/^0x[0-9a-fA-F]{40}$/.test(addr)) {
       setStatus("error");
-      setMessages(["Invalid address — must start with 0x and be 42 characters long"]);
+      setMessages(["Invalid address — must be 0x followed by 40 hex characters"]);
       return;
     }
 
@@ -28,76 +19,95 @@ export function useWalletData() {
     setMessages([]);
     setData(null);
 
-    const addr = address.trim();
-    const results = { profile: null, traded: null, value: null, activity: null, trades: null };
-    const errors  = {};
+    const results = {};
+    const log     = [];
 
-    // ── 1. Profile
+    // ── 1. Profile (derived from activity)
     try {
-      const raw = await safeFetch(`${BASE}/profile?address=${addr}`);
-      results.profile = Array.isArray(raw) ? raw[0] : raw;
-      addMsg("✓ Profile loaded");
+      const res  = await fetch(`${BASE}/profile?address=${addr}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      results.profile = json;
+      log.push(`✓ Profile: ${json.pseudonym ?? json.name ?? addr.slice(0, 8) + "…"}`);
     } catch (e) {
-      errors.profile = e.message;
-      addMsg("✗ Profile: " + e.message);
+      results.profile = null;
+      log.push(`✗ Profile: ${e.message}`);
     }
 
-    // ── 2. Traded volume
+    // ── 2. Volume (summed from TRADE activity — reliable)
     try {
-      const raw = await safeFetch(`${BASE}/traded?address=${addr}`);
-      results.traded = Number(raw?.volumeTraded ?? raw?.volume ?? 0);
-      addMsg(`✓ Volume: $${results.traded.toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+      const res  = await fetch(`${BASE}/traded?address=${addr}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+
+      // Response: { volumeTraded, tradeCount, earliestTradeTimestamp }
+      results.volumeTraded          = Number(json.volumeTraded ?? 0);
+      results.tradeCount            = Number(json.tradeCount ?? 0);
+      results.earliestTradeTimestamp = json.earliestTradeTimestamp ?? null;
+
+      log.push(`✓ Volume: $${results.volumeTraded.toLocaleString(undefined, { maximumFractionDigits: 2 })} (${results.tradeCount} trades)`);
     } catch (e) {
-      errors.traded = e.message;
-      addMsg("✗ Volume: " + e.message);
+      results.volumeTraded = null;
+      log.push(`✗ Volume: ${e.message}`);
     }
 
-    // ── 3. Portfolio value (PnL proxy)
+    // ── 3. Portfolio value + PnL (from positions)
     try {
-      const raw = await safeFetch(`${BASE}/value?address=${addr}`);
-      results.value = Number(raw?.portfolioValue ?? raw?.value ?? 0);
-      addMsg(`✓ Portfolio value: $${results.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+      const res  = await fetch(`${BASE}/value?address=${addr}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+
+      // Response: { portfolioValue, cashPnl, positionCount }
+      results.portfolioValue = Number(json.portfolioValue ?? 0);
+      results.cashPnl        = Number(json.cashPnl        ?? json.portfolioValue ?? 0);
+      results.positionCount  = Number(json.positionCount  ?? 0);
+
+      log.push(`✓ Portfolio: $${results.portfolioValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} | PnL: $${results.cashPnl.toFixed(2)}`);
     } catch (e) {
-      errors.value = e.message;
-      addMsg("✗ Portfolio value: " + e.message);
+      results.portfolioValue = null;
+      results.cashPnl        = null;
+      log.push(`✗ Portfolio: ${e.message}`);
     }
 
-    // ── 4. LP Rewards (REWARD activity)
+    // ── 4. LP Rewards (REWARD-type activity)
     try {
-      const raw = await safeFetch(`${BASE}/activity?address=${addr}`);
+      const res  = await fetch(`${BASE}/activity?address=${addr}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+
+      // Response: { totalLPRewards, rewardCount, earliestTimestamp, items }
       results.activity = {
-        totalLP:   Number(raw.totalLPRewards ?? 0),
-        count:     raw.rewardCount ?? 0,
-        earliest:  raw.earliestTimestamp ?? null,
-        items:     raw.items ?? [],
+        totalLP:   Number(json.totalLPRewards ?? 0),
+        count:     Number(json.rewardCount    ?? 0),
+        earliest:  json.earliestTimestamp     ?? null,
+        items:     json.items                 ?? [],
       };
-      addMsg(`✓ LP rewards: $${results.activity.totalLP.toLocaleString(undefined, { maximumFractionDigits: 2 })} (${results.activity.count} payouts)`);
+
+      log.push(`✓ LP rewards: $${results.activity.totalLP.toLocaleString(undefined, { maximumFractionDigits: 2 })} (${results.activity.count} payouts)`);
     } catch (e) {
-      errors.activity = e.message;
-      addMsg("✗ LP rewards: " + e.message);
+      results.activity = null;
+      log.push(`✗ LP rewards: ${e.message}`);
     }
 
     // ── 5. Recent trades
     try {
-      const raw = await safeFetch(`${BASE}/trades?address=${addr}`);
-      results.trades = raw;
-      addMsg(`✓ Trades: ${raw.length} recent trades loaded`);
+      const res  = await fetch(`${BASE}/trades?address=${addr}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      results.trades = Array.isArray(json) ? json : [];
+      log.push(`✓ Trades: ${results.trades.length} recent trades loaded`);
     } catch (e) {
-      errors.trades = e.message;
-      addMsg("✗ Trades: " + e.message);
+      results.trades = [];
+      log.push(`✗ Trades: ${e.message}`);
     }
 
-    const successCount = Object.values(results).filter(Boolean).length;
+    // ── Determine overall status
+    const successes = log.filter((m) => m.startsWith("✓")).length;
+    const failures  = log.filter((m) => m.startsWith("✗")).length;
 
-    if (successCount === 0) {
-      setStatus("error");
-    } else if (Object.keys(errors).length > 0) {
-      setStatus("partial");
-    } else {
-      setStatus("success");
-    }
-
+    setMessages(log);
     setData(results);
+    setStatus(failures === 0 ? "success" : successes === 0 ? "error" : "partial");
   }, []);
 
   return { status, messages, data, fetchWallet };
