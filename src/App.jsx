@@ -3,17 +3,10 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, ReferenceLine,
 } from "recharts";
-import { useWalletData } from "./hooks/useWalletData.js";
-import {
-  computeAirdrop, computeLPScores, lpOrderScore,
-  fmtN, fmtUSD, fmtAddr,
-} from "./lib/formulas.js";
-import {
-  C, Card, Lbl, Mono, Metric, MultTag, Toggle, Slider,
-  TabBar, ScoreBar, TOOLTIP_STYLE,
-} from "./components/UI.jsx";
+import { useWalletData }                          from "./hooks/useWalletData.js";
+import { computeAirdrop, computeLPScores, lpOrderScore, fmtN, fmtUSD, fmtAddr } from "./lib/formulas.js";
+import { C, Card, Lbl, Mono, Metric, MultTag, Toggle, Slider, TabBar, TOOLTIP_STYLE } from "./components/UI.jsx";
 
-// ─── LEADERBOARD SCENARIOS ────────────────────────────────────────────────────
 const SCENARIOS = [
   { label:"Bear",  fdvV:2e9,  color:C.red    },
   { label:"Base",  fdvV:10e9, color:C.amber  },
@@ -21,45 +14,32 @@ const SCENARIOS = [
   { label:"Ultra", fdvV:50e9, color:C.purple },
 ];
 
-// ─── SOCIAL SCORE — computed from REAL user-entered inputs ───────────────────
-function computeSocialScore({ followers, mentions, linked, accountAgeDays, tweetImpressions }) {
-  // Influence: log-weighted followers + impressions signal
-  const followerWeight  = Math.min(100, Math.log10(followers + 1) / Math.log10(1_000_001) * 100);
-  const impressionWeight= Math.min(100, Math.log10(tweetImpressions + 1) / Math.log10(10_000_001) * 100);
-  const mentionWeight   = Math.min(100, Math.log1p(mentions) / Math.log1p(500) * 100);
-  const ageWeight       = Math.min(100, accountAgeDays / 1825 * 100); // 5 years = max
+const TABS = [
+  { id:"checker",     label:"Airdrop Checker" },
+  { id:"lpscore",     label:"LP Calculator"   },
+  { id:"simulator",   label:"Tokenomics"       },
+  { id:"scenarios",   label:"Scenarios"        },
+  { id:"leaderboard", label:"Leaderboard"      },
+];
 
-  const influenceScore = (followerWeight * 0.40 + impressionWeight * 0.30 + mentionWeight * 0.20 + ageWeight * 0.10);
-  const promoterScore  = (mentionWeight * 0.60 + followerWeight * 0.30 + (linked ? 10 : 0));
-
-  // Conservative: social bonus capped at 1% of pool for top influencers
-  const poolBonusPct = (Math.min(influenceScore, 100) / 100) * 0.01;
-
-  return { followerWeight, impressionWeight, mentionWeight, ageWeight, influenceScore, promoterScore, poolBonusPct };
-}
-
-// ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("checker");
 
-  // ── Wallet inputs
-  const [walletInput,  setWalletInput]  = useState("");
-  const [twitterInput, setTwitterInput] = useState("");
-
-  // ── Data hook
+  // ── Wallet
+  const [walletInput, setWalletInput] = useState("");
   const { status: fetchStatus, messages: fetchMessages, data: walletData, fetchWallet } = useWalletData();
 
   // ── Manual overrides
-  const [manualVol,   setManualVol]   = useState(50000);
-  const [manualPnL,   setManualPnL]   = useState(2500);
-  const [manualLP,    setManualLP]    = useState(0);
-  const [useManual,   setUseManual]   = useState(true);
+  const [manualVol,  setManualVol]  = useState(50000);
+  const [manualPnL,  setManualPnL]  = useState(2500);
+  const [manualLP,   setManualLP]   = useState(0);
+  const [useManual,  setUseManual]  = useState(true);
 
   // ── Eligibility
   const [isEarlyUser, setIsEarlyUser] = useState(false);
   const [isEarlyLP,   setIsEarlyLP]   = useState(false);
 
-  // ── Tokenomics sliders
+  // ── Tokenomics
   const [totalSupply,  setTotalSupply]  = useState(1_000_000_000);
   const [airdropPct,   setAirdropPct]   = useState(10);
   const [fdv,          setFdv]          = useState(10_000_000_000);
@@ -68,40 +48,32 @@ export default function App() {
   const [totalPlatLP,  setTotalPlatLP]  = useState(50_000_000);
 
   // ── LP calc
-  const [lpV,    setLpV]    = useState(3);
+  const [lpV, setLpV]       = useState(3);
   const [lpSBid, setLpSBid] = useState(1);
   const [lpSAsk, setLpSAsk] = useState(1.2);
-  const [lpBid,  setLpBid]  = useState(200);
-  const [lpAsk,  setLpAsk]  = useState(200);
-  const [lpMid,  setLpMid]  = useState(0.50);
-
-  // ── Twitter MANUAL inputs (separate from wallet)
-  const [twHandle,      setTwHandle]      = useState("");
-  const [twFollowers,   setTwFollowers]   = useState(0);
-  const [twMentions,    setTwMentions]    = useState(0);
-  const [twImpressions, setTwImpressions] = useState(0);
-  const [twLinked,      setTwLinked]      = useState(false);
-  const [twAgeDays,     setTwAgeDays]     = useState(365);
+  const [lpBid, setLpBid]   = useState(200);
+  const [lpAsk, setLpAsk]   = useState(200);
+  const [lpMid, setLpMid]   = useState(0.50);
 
   // ── Real leaderboard
-  const [lbData,    setLbData]    = useState([]);
+  const [lbRows,    setLbRows]    = useState([]);
   const [lbLoading, setLbLoading] = useState(false);
   const [lbWindow,  setLbWindow]  = useState("all");
   const [lbOrder,   setLbOrder]   = useState("profit");
   const [lbError,   setLbError]   = useState(null);
 
-  // ── Derived values
-  const profile      = walletData?.profile        ?? null;
-  const fetchedVol   = walletData?.volumeTraded   ?? null;
-  const fetchedPnL   = walletData?.cashPnl        ?? null;
+  // ── Derived from fetched data
+  const profile      = walletData?.profile       ?? null;
+  const fetchedVol   = walletData?.volumeTraded  ?? null;
+  const fetchedPnL   = walletData?.totalPnl      ?? null;   // cashPnl + realizedPnl
   const fetchedLP    = walletData?.activity?.totalLP ?? null;
-  const recentTrades = walletData?.trades         ?? [];
+  const recentTrades = walletData?.trades        ?? [];
 
   const userVolume    = (!useManual && fetchedVol !== null) ? fetchedVol : manualVol;
   const userPnL       = (!useManual && fetchedPnL !== null) ? fetchedPnL : manualPnL;
   const userLPRewards = (!useManual && fetchedLP  !== null) ? fetchedLP  : manualLP;
 
-  // ── Main result
+  // ── Airdrop result
   const result = useMemo(() => computeAirdrop({
     userVolume, userPnL, userLPRewards,
     totalPlatformVol: totalPlatVol, totalPlatformLP: totalPlatLP,
@@ -109,25 +81,11 @@ export default function App() {
   }), [userVolume, userPnL, userLPRewards, totalPlatVol, totalPlatLP,
        totalSupply, airdropPct, fdv, lpAllocPct, isEarlyUser, isEarlyLP]);
 
-  // ── Social score (from real inputs)
-  const socialScore = useMemo(() => {
-    if (!twHandle.trim()) return null;
-    return computeSocialScore({
-      followers:    twFollowers,
-      mentions:     twMentions,
-      linked:       twLinked,
-      accountAgeDays: twAgeDays,
-      tweetImpressions: twImpressions,
-    });
-  }, [twHandle, twFollowers, twMentions, twLinked, twAgeDays, twImpressions]);
-
   // ── Scenarios
   const scenarios = useMemo(() => SCENARIOS.map(s => {
-    const r = computeAirdrop({
-      userVolume, userPnL, userLPRewards,
+    const r = computeAirdrop({ userVolume, userPnL, userLPRewards,
       totalPlatformVol: totalPlatVol, totalPlatformLP: totalPlatLP,
-      totalSupply, airdropPct, fdv: s.fdvV, lpAllocPct, isEarlyUser, isEarlyLP,
-    });
+      totalSupply, airdropPct, fdv: s.fdvV, lpAllocPct, isEarlyUser, isEarlyLP });
     return { ...s, price: s.fdvV / totalSupply, poly: r.rawTotal, usd: r.usdValue };
   }), [userVolume, userPnL, userLPRewards, totalPlatVol, totalPlatLP,
        totalSupply, airdropPct, lpAllocPct, isEarlyUser, isEarlyLP]);
@@ -139,16 +97,12 @@ export default function App() {
   }), [lpV, lpSBid, lpSAsk, lpBid, lpAsk, lpMid]);
 
   const spreadCurve = useMemo(() =>
-    Array.from({length:31},(_,i) => {
-      const s = i/30*lpV;
-      return { s: s.toFixed(1), score: (lpOrderScore(lpV,s,1)*100).toFixed(1) };
-    }), [lpV]);
+    Array.from({length:31},(_,i)=>{const s=i/30*lpV;return{s:s.toFixed(1),score:(lpOrderScore(lpV,s,1)*100).toFixed(1)};})
+  , [lpV]);
 
   const emitData = useMemo(() =>
-    Array.from({length:12},(_,i) => ({
-      month: `M${i+1}`,
-      circ: Math.round(totalSupply*(0.20+0.80*(1-Math.exp(-(i+1)*0.22)))),
-    })), [totalSupply]);
+    Array.from({length:12},(_,i)=>({month:`M${i+1}`,circ:Math.round(totalSupply*(0.20+0.80*(1-Math.exp(-(i+1)*0.22))))}))
+  , [totalSupply]);
 
   // ── Fetch wallet
   const handleFetch = useCallback(async () => {
@@ -156,59 +110,45 @@ export default function App() {
     setUseManual(false);
   }, [walletInput, fetchWallet]);
 
-  // ── Auto-sync eligibility
+  // ── Auto-detect eligibility
   useEffect(() => {
     if (!walletData) return;
-    const earliestTrade = walletData.earliestTradeTimestamp ?? null;
-    const earliestLP    = walletData.activity?.earliest     ?? null;
-    const earliest      = earliestTrade ?? earliestLP;
+    const earliest = walletData.earliestTradeTimestamp ?? walletData.activity?.earliest ?? null;
     if (earliest) setIsEarlyUser(new Date(earliest * 1000) < new Date("2025-01-01"));
     setIsEarlyLP((walletData.activity?.totalLP ?? 0) >= 1);
   }, [walletData]);
 
   // ── Fetch real leaderboard
   const fetchLeaderboard = useCallback(async () => {
-    setLbLoading(true);
-    setLbError(null);
+    setLbLoading(true); setLbError(null);
     try {
       const res  = await fetch(`/.netlify/functions/leaderboard?limit=50&window=${lbWindow}&orderBy=${lbOrder}`);
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      setLbData(json.rows ?? []);
-    } catch(e) {
-      setLbError(e.message);
-      setLbData([]);
-    } finally {
-      setLbLoading(false);
-    }
+      if (json.error && !json.rows?.length) throw new Error(json.error);
+      setLbRows(json.rows ?? []);
+      if (json.error) setLbError(json.error); // partial error but got some rows
+    } catch(e) { setLbError(e.message); setLbRows([]); }
+    setLbLoading(false);
   }, [lbWindow, lbOrder]);
 
-  useEffect(() => {
-    if (tab === "leaderboard") fetchLeaderboard();
-  }, [tab, lbWindow, lbOrder]);
+  useEffect(() => { if (tab === "leaderboard") fetchLeaderboard(); }, [tab, lbWindow, lbOrder]);
 
-  // ── Pie data
   const pieData = [
     { name:"Trading", value: result.tradingAlloc, color: C.blue },
     { name:"LP",      value: result.lpAlloc,      color: C.teal },
   ];
 
-  const statusColor = { idle:C.muted, loading:C.amber, partial:C.amber, success:C.green, error:C.red }[fetchStatus] ?? C.muted;
-  const statusIcon  = { idle:"○", loading:"↻", partial:"◑", success:"✓", error:"✗" }[fetchStatus] ?? "○";
+  const statusColor = {idle:C.muted,loading:C.amber,partial:C.amber,success:C.green,error:C.red}[fetchStatus]??C.muted;
 
-  const TABS = [
-    { id:"checker",     label:"Airdrop Checker"   },
-    { id:"social",      label:"𝕏 Social Score"    },
-    { id:"lpscore",     label:"LP Calculator"      },
-    { id:"simulator",   label:"Tokenomics"          },
-    { id:"scenarios",   label:"Scenarios"           },
-    { id:"leaderboard", label:"Leaderboard"         },
-  ];
+  // ── Shared header/footer style helpers
+  const sect = (label) => (
+    <div style={{ fontFamily:"'Syne'", fontSize:13, fontWeight:700, color:C.green, letterSpacing:1.5, textTransform:"uppercase", marginBottom:14 }}>{label}</div>
+  );
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg, color:C.text }}>
 
-      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
+      {/* HEADER */}
       <header style={{ borderBottom:`1px solid ${C.border}`, padding:"0 24px" }}>
         <div style={{ maxWidth:1280, margin:"0 auto", height:56, display:"flex", alignItems:"center", justifyContent:"space-between", gap:16 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
@@ -216,62 +156,62 @@ export default function App() {
               <span style={{ fontFamily:"'IBM Plex Mono'", fontSize:14, fontWeight:700, color:"#fff" }}>P</span>
             </div>
             <div>
-              <div style={{ fontFamily:"'Syne'", fontSize:16, fontWeight:800, letterSpacing:1, color:"#e8f4ff" }}>POLY<span style={{ color:C.green }}>CALC</span></div>
+              <div style={{ fontFamily:"'Syne'", fontSize:16, fontWeight:800, letterSpacing:1, color:"#e8f4ff" }}>POLY<span style={{color:C.green}}>CALC</span></div>
               <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:8, color:C.muted, letterSpacing:1 }}>AIRDROP SIMULATOR</div>
             </div>
           </div>
           <TabBar tabs={TABS} active={tab} onSelect={setTab}/>
           <Mono size={9} color={statusColor} style={{ flexShrink:0 }}>
-            <span className={fetchStatus==="loading" ? "spin":""}>{statusIcon}</span>
-            {" "}{fetchStatus.toUpperCase()}
+            {fetchStatus==="loading"?"↻ ":""}
+            {fetchStatus.toUpperCase()}
           </Mono>
         </div>
       </header>
 
-      {/* ── DISCLAIMER ─────────────────────────────────────────────────────── */}
+      {/* DISCLAIMER */}
       <div style={{ borderBottom:`1px solid ${C.border}`, background:"#0a0e16", padding:"4px 24px", textAlign:"center" }}>
         <Mono size={9} color={`${C.muted}88`}>⚠ Community simulation. Formulas from polyield.xyz & Polymarket official docs. Not affiliated with Polymarket. Not financial advice.</Mono>
       </div>
 
-      {/* ── WALLET INPUT BAR — only on checker tab ──────────────────────────── */}
-      {tab === "checker" && (
+      {/* WALLET BAR — only on checker */}
+      {tab==="checker" && (
         <div style={{ borderBottom:`1px solid ${C.border}`, background:C.surface, padding:"14px 24px" }}>
           <div style={{ maxWidth:1280, margin:"0 auto" }}>
             <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"flex-end" }}>
-              <div style={{ flex:"2 1 280px" }}>
+              <div style={{ flex:"1 1 320px" }}>
                 <Lbl>Polymarket Wallet Address</Lbl>
                 <input type="text" value={walletInput} onChange={e=>setWalletInput(e.target.value)}
                   onKeyDown={e=>e.key==="Enter"&&handleFetch()}
                   placeholder="0x6af75d4e4aaf700450efbac3708cce1665810ff1"/>
               </div>
-              <div style={{ flexShrink:0 }}>
-                <button onClick={handleFetch} disabled={fetchStatus==="loading"} style={{
-                  background:`linear-gradient(135deg,${C.green}33,${C.teal}22)`,
-                  border:`1px solid ${C.green}66`, color:C.green, borderRadius:7,
-                  padding:"10px 22px", fontFamily:"'Syne'", fontSize:12, fontWeight:700,
-                  letterSpacing:1.5, textTransform:"uppercase",
-                  opacity:fetchStatus==="loading"?0.5:1, cursor:fetchStatus==="loading"?"not-allowed":"pointer",
-                }}>
-                  {fetchStatus==="loading" ? <span className="pulse">FETCHING…</span> : "FETCH & ESTIMATE"}
-                </button>
-              </div>
+              <button onClick={handleFetch} disabled={fetchStatus==="loading"} style={{
+                background:`linear-gradient(135deg,${C.green}33,${C.teal}22)`,
+                border:`1px solid ${C.green}66`, color:C.green, borderRadius:7, padding:"10px 22px",
+                fontFamily:"'Syne'", fontSize:12, fontWeight:700, letterSpacing:1.5, textTransform:"uppercase",
+                opacity:fetchStatus==="loading"?0.5:1, cursor:fetchStatus==="loading"?"not-allowed":"pointer",
+              }}>
+                {fetchStatus==="loading" ? "FETCHING…" : "FETCH & ESTIMATE"}
+              </button>
             </div>
+
+            {/* Profile strip */}
             {profile && (
               <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:12, padding:"8px 12px", background:C.card, borderRadius:8, border:`1px solid ${C.border}` }}>
                 {profile.profileImageOptimized && (
                   <img src={profile.profileImageOptimized} alt="" width={28} height={28}
-                    style={{ borderRadius:"50%", objectFit:"cover" }}
-                    onError={e=>e.target.style.display="none"}/>
+                    style={{ borderRadius:"50%", objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>
                 )}
                 <Mono size={12} color={C.green}>{fmtAddr(walletInput)}</Mono>
                 {profile.pseudonym && <Mono size={11} color={C.muted}>@{profile.pseudonym}</Mono>}
-                {profile.name     && <Mono size={12} color={C.text}>{profile.name}</Mono>}
+                {profile.name      && <Mono size={12} color={C.text}>{profile.name}</Mono>}
               </div>
             )}
-            {fetchMessages.length > 0 && (
+
+            {/* Fetch log pills */}
+            {fetchMessages.length>0 && (
               <div style={{ marginTop:8, display:"flex", gap:6, flexWrap:"wrap" }}>
-                {fetchMessages.map((m,i) => {
-                  const ok = m.startsWith("✓");
+                {fetchMessages.map((m,i)=>{
+                  const ok=m.startsWith("✓");
                   return (
                     <span key={i} style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, padding:"2px 8px", borderRadius:3,
                       background:`${ok?C.green:C.red}11`, border:`1px solid ${ok?C.green:C.red}33`, color:ok?C.green:C.red }}>
@@ -285,61 +225,75 @@ export default function App() {
         </div>
       )}
 
-      {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
+      {/* MAIN */}
       <main style={{ maxWidth:1280, margin:"0 auto", padding:"20px 24px 60px" }}>
 
-        {/* ════════ AIRDROP CHECKER ════════ */}
+        {/* ══════ AIRDROP CHECKER ══════ */}
         {tab==="checker" && (
           <div className="fu">
+
+            {/* Data inputs */}
             <Card accent={C.dimmed} style={{ marginBottom:14 }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
                 <div style={{ fontFamily:"'Syne'", fontSize:12, fontWeight:700, color:C.muted, letterSpacing:1.5, textTransform:"uppercase" }}>
-                  {fetchedVol!==null&&!useManual ? "Live On-Chain Data (Polymarket APIs)" : "Manual Input — Enter Your Stats"}
+                  {fetchedVol!==null&&!useManual ? "Live On-Chain Data" : "Manual Input"}
                 </div>
                 {fetchedVol!==null && (
-                  <button onClick={()=>setUseManual(!useManual)} style={{ background:"transparent", border:`1px solid ${C.border2}`, color:C.muted, borderRadius:5, padding:"5px 12px", fontFamily:"'Syne'", fontSize:10, letterSpacing:1, cursor:"pointer" }}>
+                  <button onClick={()=>setUseManual(!useManual)} style={{ background:"transparent", border:`1px solid ${C.border2}`, color:C.muted, borderRadius:5, padding:"5px 12px", fontFamily:"'Syne'", fontSize:10, cursor:"pointer" }}>
                     {useManual ? "← Use API data" : "Override manually →"}
                   </button>
                 )}
               </div>
+
               <div className="g3">
+                {/* Volume */}
                 <div>
                   <Lbl>Trading Volume (USD) {fetchedVol!==null&&!useManual&&<span style={{color:C.green}}>● live</span>}</Lbl>
                   <input type="number" value={useManual?manualVol:(fetchedVol??manualVol)} disabled={!useManual&&fetchedVol!==null} onChange={e=>setManualVol(Number(e.target.value))}/>
                   <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>
-                    {fetchedVol!==null ? `API: $${fetchedVol.toLocaleString(undefined,{maximumFractionDigits:2})} (${walletData?.tradeCount??0} trades)` : "Your total trading volume on Polymarket"}
+                    {fetchedVol!==null
+                      ? `API: $${fetchedVol.toLocaleString(undefined,{maximumFractionDigits:2})} from ${walletData?.tradeCount??0} TRADE events${walletData?.tradeCount>=500?" (capped at 500)":""}`
+                      : "Total USDC traded on Polymarket"}
                   </div>
                 </div>
+
+                {/* PnL */}
                 <div>
-                  <Lbl>PnL / Portfolio Value (USD) {fetchedPnL!==null&&!useManual&&<span style={{color:C.green}}>● live</span>}</Lbl>
+                  <Lbl>Total PnL (USD) {fetchedPnL!==null&&!useManual&&<span style={{color:C.green}}>● live</span>}</Lbl>
                   <input type="number" value={useManual?manualPnL:(fetchedPnL??manualPnL)} disabled={!useManual&&fetchedPnL!==null} onChange={e=>setManualPnL(Number(e.target.value))}/>
                   <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>
-                    {fetchedPnL!==null ? `API: PnL $${fetchedPnL.toFixed(2)} | Portfolio $${(walletData?.portfolioValue??0).toFixed(2)}` : "Positive = profitable trader (1.25× multiplier)"}
+                    {fetchedPnL!==null
+                      ? `Unrealised: $${(walletData?.cashPnl??0).toFixed(2)} · Realised: $${(walletData?.realizedPnl??0).toFixed(2)} · Portfolio: $${(walletData?.portfolioValue??0).toFixed(2)}`
+                      : "Positive = profitable trader (1.25× multiplier)"}
                   </div>
                 </div>
+
+                {/* LP */}
                 <div>
                   <Lbl>LP Rewards Earned (USD) {fetchedLP!==null&&!useManual&&<span style={{color:C.green}}>● live</span>}</Lbl>
                   <input type="number" value={useManual?manualLP:(fetchedLP??manualLP)} disabled={!useManual&&fetchedLP!==null} onChange={e=>setManualLP(Number(e.target.value))}/>
                   <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>
-                    {fetchedLP!==null ? `API: $${fetchedLP.toLocaleString(undefined,{maximumFractionDigits:2})} from ${walletData?.activity?.count??0} reward payouts` : "Total USDC earned from Polymarket LP rewards"}
+                    {fetchedLP!==null
+                      ? `API: $${fetchedLP.toFixed(2)} from ${walletData?.activity?.count??0} reward payouts`
+                      : "Total USDC earned from LP reward programs"}
                   </div>
                 </div>
               </div>
+
               <div style={{ marginTop:14, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
                 <Lbl>Eligibility Multipliers</Lbl>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"4px 24px" }}>
                   <Toggle label="Early User — active before Jan 2025 (1.5×)" checked={isEarlyUser} onChange={setIsEarlyUser} color={C.amber}/>
                   <Toggle label="Early LP — ≥$1 LP rewards before Q2 2026 (1.25×)" checked={isEarlyLP} onChange={setIsEarlyLP} color={C.teal}/>
                 </div>
-                <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:6 }}>
-                  Profitable Trader bonus (1.25×) auto-applied when PnL/portfolio value is positive.
-                </div>
+                <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:6 }}>Profitable Trader bonus (1.25×) auto-applied when total PnL &gt; 0.</div>
               </div>
             </Card>
 
+            {/* Results */}
             <div className="g2" style={{ marginBottom:14 }}>
               <Card accent={C.green}>
-                <div style={{ fontFamily:"'Syne'", fontSize:13, fontWeight:700, color:C.green, letterSpacing:1.5, textTransform:"uppercase", marginBottom:14 }}>Estimated Allocation</div>
+                {sect("Estimated Allocation")}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
                   <div style={{ padding:16, background:C.surface, borderRadius:8, border:`1px solid ${C.border}`, textAlign:"center" }}>
                     <Lbl>Total POLY</Lbl>
@@ -353,18 +307,19 @@ export default function App() {
                   </div>
                 </div>
                 <div className="g3">
-                  <Metric label="From Trading" value={fmtN(result.tradingAlloc)} color={C.blue} sub={`${(result.volShare*100).toFixed(6)}% vol share`} size={14}/>
-                  <Metric label="From LP"      value={fmtN(result.lpAlloc)}      color={C.teal} sub={`${(result.lpShare*100).toFixed(6)}% LP share`}  size={14}/>
+                  <Metric label="From Trading" value={fmtN(result.tradingAlloc)} color={C.blue}  sub={`${(result.volShare*100).toFixed(6)}% vol share`} size={14}/>
+                  <Metric label="From LP"      value={fmtN(result.lpAlloc)}      color={C.teal}  sub={`${(result.lpShare*100).toFixed(6)}% LP share`}  size={14}/>
                   <Metric label="Multiplier"   value={`${result.mult.toFixed(4)}×`} color={C.amber} sub="combined" size={14}/>
                 </div>
               </Card>
+
               <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
                 <Card accent={C.amber}>
                   <Lbl>Multipliers (PolyYield exact values)</Lbl>
                   <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                    <MultTag label="Early User (active before Jan 2025)"     value="1.5×"  color={C.amber} active={result.earlyUser}/>
-                    <MultTag label="Profitable Trader (portfolio value > 0)" value="1.25×" color={C.green} active={result.profitable}/>
-                    <MultTag label="Early LP (≥$1 rewards, before Q2 2026)"  value="1.25×" color={C.teal}  active={result.earlyLP}/>
+                    <MultTag label="Early User (before Jan 2025)"         value="1.5×"  color={C.amber} active={result.earlyUser}/>
+                    <MultTag label="Profitable Trader (total PnL > 0)"    value="1.25×" color={C.green} active={result.profitable}/>
+                    <MultTag label="Early LP (≥$1 rewards, before Q2 2026)" value="1.25×" color={C.teal}  active={result.earlyLP}/>
                   </div>
                   <div style={{ marginTop:10, padding:"8px 10px", background:C.surface, borderRadius:6, border:`1px solid ${C.border}` }}>
                     <div style={{ display:"flex", justifyContent:"space-between" }}>
@@ -372,7 +327,7 @@ export default function App() {
                       <Mono size={12} color={C.amber}>2.344×</Mono>
                     </div>
                     <div style={{ display:"flex", justifyContent:"space-between", marginTop:4 }}>
-                      <Mono size={10} color={C.muted}>Your share of airdrop pool</Mono>
+                      <Mono size={10} color={C.muted}>Your % of airdrop pool</Mono>
                       <Mono size={10} color={C.muted}>{(result.pctOfPool*100).toFixed(6)}%</Mono>
                     </div>
                   </div>
@@ -394,11 +349,12 @@ export default function App() {
               </div>
             </div>
 
+            {/* Stats */}
             <div className="g4" style={{ marginBottom:14 }}>
               {[
                 { label:"Airdrop Pool",    value:fmtN(result.airdropPool)+" POLY", color:C.green },
-                { label:"Trading Pool",    value:fmtN(result.tradingPool)+" POLY", color:C.blue },
-                { label:"LP Pool",         value:fmtN(result.lpPool)+" POLY",      color:C.teal },
+                { label:"Trading Pool",    value:fmtN(result.tradingPool)+" POLY", color:C.blue  },
+                { label:"LP Pool",         value:fmtN(result.lpPool)+" POLY",      color:C.teal  },
                 { label:"Token Price",     value:fmtUSD(result.tokenPrice),         color:C.amber },
                 { label:"Your Vol Share",  value:(result.volShare*100).toFixed(6)+"%", color:C.blue },
                 { label:"Your LP Share",   value:(result.lpShare*100).toFixed(6)+"%",  color:C.teal },
@@ -407,19 +363,22 @@ export default function App() {
               ].map(m=><Metric key={m.label} {...m} size={14}/>)}
             </div>
 
+            {/* Recent trades table */}
             {recentTrades.length>0 && (
               <Card accent={C.blue} style={{ marginBottom:14 }}>
-                <Lbl>Recent Trades (live)</Lbl>
+                <Lbl>Recent Trades (live from Polymarket API)</Lbl>
                 <div style={{ maxHeight:200, overflowY:"auto" }}>
                   <div style={{ display:"grid", gridTemplateColumns:"80px 1fr 55px 80px 70px", gap:8, padding:"0 6px 8px", borderBottom:`1px solid ${C.border}` }}>
-                    {["Date","Market","Side","Size","Outcome"].map(h=><Lbl key={h} style={{ marginBottom:0 }}>{h}</Lbl>)}
+                    {["Date","Market","Side","Size (USDC)","Outcome"].map(h=><Lbl key={h} style={{ marginBottom:0 }}>{h}</Lbl>)}
                   </div>
                   {recentTrades.map((t,i)=>(
                     <div key={i} style={{ display:"grid", gridTemplateColumns:"80px 1fr 55px 80px 70px", gap:8, padding:"7px 6px", borderBottom:`1px solid ${C.border}55` }}>
-                      <Mono size={10} color={C.muted}>{t.timestamp ? new Date(t.timestamp*1000).toLocaleDateString() : "—"}</Mono>
+                      <Mono size={10} color={C.muted}>{t.timestamp?new Date(t.timestamp*1000).toLocaleDateString():"—"}</Mono>
                       <Mono size={10} color={C.text} style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{t.title||"—"}</Mono>
                       <Mono size={10} color={t.side==="BUY"?C.green:C.red}>{t.side||"—"}</Mono>
-                      <Mono size={10} color={C.amber}>{t.usdcSize?fmtUSD(t.usdcSize):"—"}</Mono>
+                      <Mono size={10} color={C.amber}>
+                        {t.usdcSize ? fmtUSD(t.usdcSize) : (t.size&&t.price ? fmtUSD(t.size*t.price) : "—")}
+                      </Mono>
                       <Mono size={10} color={C.muted}>{t.outcome||"—"}</Mono>
                     </div>
                   ))}
@@ -439,150 +398,50 @@ export default function App() {
           </div>
         )}
 
-        {/* ════════ SOCIAL SCORE — FULLY STANDALONE ════════ */}
-        {tab==="social" && (
-          <div className="fu">
-            {/* Header */}
-            <div style={{ marginBottom:20, padding:"16px 20px", background:C.card, borderRadius:10, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.pink}` }}>
-              <div style={{ fontFamily:"'Syne'", fontSize:18, fontWeight:800, color:C.text, marginBottom:6 }}>𝕏 Social Influence Score</div>
-              <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:11, color:C.muted, lineHeight:1.8 }}>
-                This section is <span style={{color:C.pink}}>completely independent</span> from your wallet. Enter your real Twitter/X stats below — follower count, how many times you've posted about Polymarket, etc. Scores are computed from your inputs, not estimated guesses.
-                <br/>Twitter's API requires paid access so we cannot fetch your data automatically.
-              </div>
-            </div>
-
-            <div className="g2" style={{ marginBottom:14 }}>
-              {/* INPUT FORM */}
-              <Card accent={C.pink}>
-                <div style={{ fontFamily:"'Syne'", fontSize:13, fontWeight:700, color:C.pink, letterSpacing:1.5, textTransform:"uppercase", marginBottom:16 }}>Your Real Twitter / X Stats</div>
-                <div style={{ marginBottom:14 }}>
-                  <Lbl>Twitter / X Handle</Lbl>
-                  <input type="text" value={twHandle} onChange={e=>setTwHandle(e.target.value)} placeholder="@yourhandle"/>
-                </div>
-                <div style={{ marginBottom:14 }}>
-                  <Lbl>Follower Count (check your profile)</Lbl>
-                  <input type="number" value={twFollowers} onChange={e=>setTwFollowers(Number(e.target.value))} placeholder="e.g. 650"/>
-                  <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>Go to x.com → your profile → check Followers number</div>
-                </div>
-                <div style={{ marginBottom:14 }}>
-                  <Lbl>Polymarket Mentions / Posts (your estimate)</Lbl>
-                  <input type="number" value={twMentions} onChange={e=>setTwMentions(Number(e.target.value))} placeholder="e.g. 15"/>
-                  <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>How many tweets/posts about Polymarket have you made?</div>
-                </div>
-                <div style={{ marginBottom:14 }}>
-                  <Lbl>Estimated Tweet Impressions (total)</Lbl>
-                  <input type="number" value={twImpressions} onChange={e=>setTwImpressions(Number(e.target.value))} placeholder="e.g. 50000"/>
-                  <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>Check x.com/analytics for your total impressions (optional)</div>
-                </div>
-                <div style={{ marginBottom:14 }}>
-                  <Lbl>Twitter Account Age (days)</Lbl>
-                  <input type="number" value={twAgeDays} onChange={e=>setTwAgeDays(Number(e.target.value))} placeholder="e.g. 1200"/>
-                  <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>Approximate days since you created your account</div>
-                </div>
-                <Toggle label="X account linked to Polymarket profile" checked={twLinked} onChange={setTwLinked} color={C.pink}/>
-                <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:4 }}>Link at polymarket.com → Settings → Connect X account</div>
-              </Card>
-
-              {/* RESULTS */}
-              {!twHandle.trim() ? (
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"center", padding:40, background:C.card, borderRadius:10, border:`1px solid ${C.border}` }}>
-                  <div style={{ textAlign:"center" }}>
-                    <div style={{ fontSize:40, marginBottom:12 }}>𝕏</div>
-                    <Mono size={12} color={C.muted}>Enter your handle to see your score</Mono>
-                  </div>
-                </div>
-              ) : !socialScore ? null : (
-                <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-                  <Card accent={C.pink}>
-                    <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16, padding:"10px 12px", background:C.surface, borderRadius:8, border:`1px solid ${C.border}` }}>
-                      <div style={{ width:40, height:40, borderRadius:"50%", background:`linear-gradient(135deg,${C.blue},${C.pink})`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                        <span style={{ fontSize:18 }}>𝕏</span>
-                      </div>
-                      <div>
-                        <Mono size={16} color={C.text}>{twHandle.startsWith("@")?twHandle:"@"+twHandle}</Mono>
-                        <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:10, color: twLinked?C.green:C.muted, marginTop:3 }}>
-                          {twLinked ? "✓ Linked to Polymarket" : "Not linked — link for eligibility"}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="g2">
-                      <div style={{ padding:"14px", background:C.surface, borderRadius:8, border:`1px solid ${C.border}`, textAlign:"center" }}>
-                        <Lbl>Influence Score</Lbl>
-                        <Mono size={26} color={C.pink}>{socialScore.influenceScore.toFixed(1)}</Mono>
-                        <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted }}>/100</div>
-                      </div>
-                      <div style={{ padding:"14px", background:C.surface, borderRadius:8, border:`1px solid ${C.border}`, textAlign:"center" }}>
-                        <Lbl>Promoter Score</Lbl>
-                        <Mono size={26} color={C.purple}>{socialScore.promoterScore.toFixed(1)}</Mono>
-                        <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted }}>/100</div>
-                      </div>
-                    </div>
-                  </Card>
-                  <Card accent={C.purple}>
-                    <Lbl>Score Breakdown (from your inputs)</Lbl>
-                    <ScoreBar label={`Follower weight — ${twFollowers.toLocaleString()} followers`} value={socialScore.followerWeight}   color={C.blue}/>
-                    <ScoreBar label={`Impression reach — ${twImpressions.toLocaleString()} impressions`} value={socialScore.impressionWeight} color={C.amber}/>
-                    <ScoreBar label={`Mention frequency — ${twMentions} Polymarket posts`} value={socialScore.mentionWeight}   color={C.teal}/>
-                    <ScoreBar label={`Account age — ${twAgeDays} days`}           value={socialScore.ageWeight}       color={C.purple}/>
-                  </Card>
-                  <Card accent={C.amber}>
-                    <Lbl>Estimated Airdrop Social Bonus</Lbl>
-                    <Metric label="Social bonus % of pool" value={(socialScore.poolBonusPct*100).toFixed(4)+"%"} color={C.amber} size={15} style={{ marginBottom:10 }}/>
-                    <Metric label="Est. Social POLY"
-                      value={fmtN(result.airdropPool*socialScore.poolBonusPct)}
-                      color={C.pink} size={15}
-                      sub={"≈ "+fmtUSD(result.airdropPool*socialScore.poolBonusPct*result.tokenPrice)}/>
-                  </Card>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ════════ LP CALCULATOR ════════ */}
+        {/* ══════ LP CALCULATOR ══════ */}
         {tab==="lpscore" && (
           <div className="fu">
             <div className="g2" style={{ marginBottom:14 }}>
               <Card accent={C.teal}>
-                <div style={{ fontFamily:"'Syne'", fontSize:13, fontWeight:700, color:C.teal, letterSpacing:1.5, textTransform:"uppercase", marginBottom:14 }}>LP Order Parameters</div>
+                {sect("LP Order Parameters")}
                 <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:10, color:C.muted, padding:"8px 10px", background:C.surface, borderRadius:6, border:`1px solid ${C.border}`, marginBottom:14, lineHeight:1.9 }}>
-                  Official Polymarket formula:<br/>
-                  <span style={{color:C.teal}}>S(v, s) = ((v − s) / v)² × size</span><br/>
-                  <span style={{color:C.muted}}>v = max_spread · s = your spread from midpoint · sampled every 1 min</span>
+                  Official formula (docs.polymarket.com):<br/>
+                  <span style={{color:C.teal}}>S(v,s) = ((v−s)/v)² × size</span><br/>
+                  <span style={{color:C.muted}}>v=max_spread · s=your spread from midpoint · 10,080 samples/epoch</span>
                 </div>
-                <Slider label="Max Spread v (cents)"      value={lpV}    min={0.5} max={10}   step={0.5} fmt={v=>v+"¢"}            onChange={setLpV}    color={C.teal}/>
-                <Slider label="Your Bid Spread (cents)"   value={lpSBid} min={0}   max={lpV}  step={0.1} fmt={v=>v.toFixed(1)+"¢"} onChange={v=>setLpSBid(Math.min(v,lpV))} color={C.blue}/>
-                <Slider label="Your Ask Spread (cents)"   value={lpSAsk} min={0}   max={lpV}  step={0.1} fmt={v=>v.toFixed(1)+"¢"} onChange={v=>setLpSAsk(Math.min(v,lpV))} color={C.blue}/>
-                <Slider label="Bid Size (shares)"         value={lpBid}  min={10}  max={5000} step={10}  fmt={v=>v.toLocaleString()} onChange={setLpBid}  color={C.amber}/>
-                <Slider label="Ask Size (shares)"         value={lpAsk}  min={10}  max={5000} step={10}  fmt={v=>v.toLocaleString()} onChange={setLpAsk}  color={C.amber}/>
-                <Slider label="Market Midpoint"           value={lpMid}  min={0.01} max={0.99} step={0.01} fmt={v=>(v*100).toFixed(0)+"¢"} onChange={setLpMid} color={C.purple}/>
+                <Slider label="Max Spread v (cents)"    value={lpV}    min={0.5} max={10}   step={0.5} fmt={v=>v+"¢"}            onChange={setLpV}    color={C.teal}/>
+                <Slider label="Bid Spread s (cents)"    value={lpSBid} min={0}   max={lpV}  step={0.1} fmt={v=>v.toFixed(1)+"¢"} onChange={v=>setLpSBid(Math.min(v,lpV))} color={C.blue}/>
+                <Slider label="Ask Spread s (cents)"    value={lpSAsk} min={0}   max={lpV}  step={0.1} fmt={v=>v.toFixed(1)+"¢"} onChange={v=>setLpSAsk(Math.min(v,lpV))} color={C.blue}/>
+                <Slider label="Bid Size (shares)"       value={lpBid}  min={10}  max={5000} step={10}  fmt={v=>v.toLocaleString()} onChange={setLpBid}  color={C.amber}/>
+                <Slider label="Ask Size (shares)"       value={lpAsk}  min={10}  max={5000} step={10}  fmt={v=>v.toLocaleString()} onChange={setLpAsk}  color={C.amber}/>
+                <Slider label="Market Midpoint"         value={lpMid}  min={0.01} max={0.99} step={0.01} fmt={v=>(v*100).toFixed(0)+"¢"} onChange={setLpMid} color={C.purple}/>
                 <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, marginTop:4, color:(lpMid<0.10||lpMid>0.90)?C.red:C.muted }}>
-                  {lpMid<0.10||lpMid>0.90 ? "⚠ Outside [10¢,90¢] — must be two-sided to score" : "In [10¢,90¢] — single-sided orders score at 1/3×"}
+                  {lpMid<0.10||lpMid>0.90 ? "⚠ Outside [10¢,90¢] — must be two-sided to score" : "In [10¢,90¢] — single-sided scores at 1/3×"}
                 </div>
               </Card>
               <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
                 <Card accent={C.green}>
-                  <div style={{ fontFamily:"'Syne'", fontSize:13, fontWeight:700, color:C.green, letterSpacing:1.5, textTransform:"uppercase", marginBottom:14 }}>Score Results</div>
+                  {sect("Score Results")}
                   <div className="g2">
                     <Metric label="Bid Score" value={lpOrderScore(lpV,lpSBid,lpBid).toFixed(3)} color={C.blue}  sub={`S(${lpV},${lpSBid})×${lpBid}`} size={16}/>
-                    <Metric label="Ask Score" value={lpOrderScore(lpV,lpSAsk,lpAsk).toFixed(3)} color={C.teal} sub={`S(${lpV},${lpSAsk})×${lpAsk}`} size={16}/>
+                    <Metric label="Ask Score" value={lpOrderScore(lpV,lpSAsk,lpAsk).toFixed(3)} color={C.teal}  sub={`S(${lpV},${lpSAsk})×${lpAsk}`} size={16}/>
                     <Metric label="Qone"  value={lpResult.Qone.toFixed(3)} color={C.text} sub="first side"  size={16}/>
                     <Metric label="Qtwo"  value={lpResult.Qtwo.toFixed(3)} color={C.text} sub="second side" size={16}/>
                     <Metric label="Qmin (per sample)" value={lpResult.Qmin.toFixed(3)}  color={C.green} size={18}/>
                     <Metric label="Epoch Score"       value={fmtN(lpResult.epochScore)} color={C.amber} sub="×10,080 samples" size={18}/>
                   </div>
                   <div style={{ marginTop:12, padding:"10px 12px", background:C.surface, borderRadius:8, border:`1px solid ${C.border}`, fontFamily:"'IBM Plex Mono'", fontSize:11, color:C.muted, lineHeight:2 }}>
-                    Bid: (({lpV}−{lpSBid})/{lpV})² × {lpBid} = <span style={{color:C.blue}}>{lpOrderScore(lpV,lpSBid,lpBid).toFixed(4)}</span><br/>
-                    Ask: (({lpV}−{lpSAsk})/{lpV})² × {lpAsk} = <span style={{color:C.teal}}>{lpOrderScore(lpV,lpSAsk,lpAsk).toFixed(4)}</span><br/>
+                    Bid: (({lpV}−{lpSBid})/{lpV})²×{lpBid} = <span style={{color:C.blue}}>{lpOrderScore(lpV,lpSBid,lpBid).toFixed(4)}</span><br/>
+                    Ask: (({lpV}−{lpSAsk})/{lpV})²×{lpAsk} = <span style={{color:C.teal}}>{lpOrderScore(lpV,lpSAsk,lpAsk).toFixed(4)}</span><br/>
                     Epoch = {lpResult.Qmin.toFixed(3)} × 10,080 = <span style={{color:C.amber}}>{fmtN(lpResult.epochScore)}</span>
                   </div>
                 </Card>
                 <Card accent={C.blue}>
-                  <Lbl>Quadratic Decay — Score vs Spread</Lbl>
+                  <Lbl>Quadratic Decay Curve</Lbl>
                   <ResponsiveContainer width="100%" height={190}>
-                    <LineChart data={spreadCurve} margin={{ top:5, right:5, left:0, bottom:16 }}>
-                      <XAxis dataKey="s" tick={{ fill:C.muted, fontSize:9, fontFamily:"'IBM Plex Mono'" }} label={{ value:"spread (¢)", fill:C.muted, fontSize:9, position:"insideBottom", offset:-8 }}/>
-                      <YAxis tick={{ fill:C.muted, fontSize:9, fontFamily:"'IBM Plex Mono'" }} tickFormatter={v=>v+"%"}/>
+                    <LineChart data={spreadCurve} margin={{ top:5,right:5,left:0,bottom:16 }}>
+                      <XAxis dataKey="s" tick={{ fill:C.muted,fontSize:9,fontFamily:"'IBM Plex Mono'" }} label={{ value:"spread (¢)",fill:C.muted,fontSize:9,position:"insideBottom",offset:-8 }}/>
+                      <YAxis tick={{ fill:C.muted,fontSize:9,fontFamily:"'IBM Plex Mono'" }} tickFormatter={v=>v+"%"}/>
                       <Tooltip {...TOOLTIP_STYLE} formatter={v=>[v+"%","Score"]} labelFormatter={v=>`${v}¢`}/>
                       <Line type="monotone" dataKey="score" stroke={C.teal} strokeWidth={2} dot={false}/>
                       <ReferenceLine x={String(lpSBid.toFixed(1))} stroke={C.blue}  strokeDasharray="3 3"/>
@@ -595,12 +454,12 @@ export default function App() {
           </div>
         )}
 
-        {/* ════════ TOKENOMICS ════════ */}
+        {/* ══════ TOKENOMICS ══════ */}
         {tab==="simulator" && (
           <div className="fu">
             <div className="g2" style={{ marginBottom:14 }}>
               <Card accent={C.green}>
-                <div style={{ fontFamily:"'Syne'", fontSize:13, fontWeight:700, color:C.green, letterSpacing:1.5, textTransform:"uppercase", marginBottom:16 }}>Tokenomics Parameters</div>
+                {sect("Tokenomics Parameters")}
                 <Slider label="Total Token Supply"      value={totalSupply}  min={100_000_000}   max={10_000_000_000}  step={100_000_000}  fmt={v=>fmtN(v)+" POLY"}  onChange={setTotalSupply}  color={C.green}/>
                 <Slider label="Airdrop Allocation %"    value={airdropPct}   min={2}             max={30}              step={0.5}          fmt={v=>v.toFixed(1)+"%"} onChange={setAirdropPct}   color={C.blue}/>
                 <Slider label="Fully Diluted Valuation" value={fdv}          min={500_000_000}   max={100_000_000_000} step={500_000_000}  fmt={v=>fmtUSD(v)}         onChange={setFdv}          color={C.amber}/>
@@ -608,13 +467,9 @@ export default function App() {
                 <Slider label="Total Platform Volume"   value={totalPlatVol} min={1_000_000_000} max={50_000_000_000}  step={500_000_000}  fmt={v=>fmtUSD(v)}         onChange={setTotalPlatVol} color={C.purple}/>
                 <Slider label="Platform LP Rewards"     value={totalPlatLP}  min={1_000_000}     max={500_000_000}     step={1_000_000}    fmt={v=>fmtUSD(v)}         onChange={setTotalPlatLP}  color={C.red}/>
                 <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:4 }}>
-                  {[
-                    { l:"Conservative", ts:1e9, ap:7,  f:2e9,  lp:25, pv:10e9, pl:20e6 },
-                    { l:"Base Case",    ts:1e9, ap:10, f:10e9, lp:30, pv:15e9, pl:50e6 },
-                    { l:"Bull Case",    ts:5e8, ap:15, f:25e9, lp:40, pv:20e9, pl:100e6 },
-                  ].map(p=>(
+                  {[{l:"Conservative",ts:1e9,ap:7,f:2e9,lp:25,pv:10e9,pl:20e6},{l:"Base Case",ts:1e9,ap:10,f:10e9,lp:30,pv:15e9,pl:50e6},{l:"Bull Case",ts:5e8,ap:15,f:25e9,lp:40,pv:20e9,pl:100e6}].map(p=>(
                     <button key={p.l} onClick={()=>{setTotalSupply(p.ts);setAirdropPct(p.ap);setFdv(p.f);setLpAllocPct(p.lp);setTotalPlatVol(p.pv);setTotalPlatLP(p.pl);}}
-                      style={{ padding:"5px 12px", borderRadius:5, background:C.surface, border:`1px solid ${C.border2}`, color:C.muted, fontFamily:"'Syne'", fontSize:10, letterSpacing:1, cursor:"pointer" }}>
+                      style={{ padding:"5px 12px",borderRadius:5,background:C.surface,border:`1px solid ${C.border2}`,color:C.muted,fontFamily:"'Syne'",fontSize:10,cursor:"pointer" }}>
                       {p.l}
                     </button>
                   ))}
@@ -622,22 +477,15 @@ export default function App() {
               </Card>
               <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
                 <div className="g2">
-                  {[
-                    { label:"Token Price",  value:fmtUSD(result.tokenPrice),          color:C.amber },
-                    { label:"Airdrop Pool", value:fmtN(result.airdropPool)+" POLY",   color:C.green },
-                    { label:"Trading Pool", value:fmtN(result.tradingPool)+" POLY",   color:C.blue  },
-                    { label:"LP Pool",      value:fmtN(result.lpPool)+" POLY",        color:C.teal  },
-                    { label:"Your POLY",    value:fmtN(result.rawTotal),              color:C.green },
-                    { label:"Your USD",     value:fmtUSD(result.usdValue),            color:C.amber },
-                  ].map(m=><Metric key={m.label} {...m} size={14}/>)}
+                  {[{label:"Token Price",value:fmtUSD(result.tokenPrice),color:C.amber},{label:"Airdrop Pool",value:fmtN(result.airdropPool)+" POLY",color:C.green},{label:"Trading Pool",value:fmtN(result.tradingPool)+" POLY",color:C.blue},{label:"LP Pool",value:fmtN(result.lpPool)+" POLY",color:C.teal},{label:"Your POLY",value:fmtN(result.rawTotal),color:C.green},{label:"Your USD",value:fmtUSD(result.usdValue),color:C.amber}].map(m=><Metric key={m.label} {...m} size={14}/>)}
                 </div>
                 <Card accent={C.blue}>
                   <Lbl>Circulating Supply Curve</Lbl>
                   <ResponsiveContainer width="100%" height={160}>
-                    <AreaChart data={emitData} margin={{ top:5, right:5, left:5, bottom:0 }}>
+                    <AreaChart data={emitData} margin={{ top:5,right:5,left:5,bottom:0 }}>
                       <defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.blue} stopOpacity={0.25}/><stop offset="95%" stopColor={C.blue} stopOpacity={0}/></linearGradient></defs>
-                      <XAxis dataKey="month" tick={{ fill:C.muted, fontSize:9, fontFamily:"'IBM Plex Mono'" }}/>
-                      <YAxis tick={{ fill:C.muted, fontSize:8, fontFamily:"'IBM Plex Mono'" }} tickFormatter={fmtN}/>
+                      <XAxis dataKey="month" tick={{ fill:C.muted,fontSize:9,fontFamily:"'IBM Plex Mono'" }}/>
+                      <YAxis tick={{ fill:C.muted,fontSize:8,fontFamily:"'IBM Plex Mono'" }} tickFormatter={fmtN}/>
                       <Tooltip {...TOOLTIP_STYLE} formatter={v=>[fmtN(v),"Circulating"]}/>
                       <Area type="monotone" dataKey="circ" stroke={C.blue} fill="url(#eg)" strokeWidth={1.5} dot={false}/>
                     </AreaChart>
@@ -648,18 +496,18 @@ export default function App() {
           </div>
         )}
 
-        {/* ════════ SCENARIOS ════════ */}
+        {/* ══════ SCENARIOS ══════ */}
         {tab==="scenarios" && (
           <div className="fu">
             <div className="g4" style={{ marginBottom:14 }}>
               {scenarios.map(s=>(
                 <Card key={s.label} accent={s.color}>
-                  <div style={{ fontFamily:"'Syne'", fontSize:16, fontWeight:800, color:s.color, letterSpacing:2, marginBottom:8 }}>{s.label.toUpperCase()}</div>
+                  <div style={{ fontFamily:"'Syne'",fontSize:16,fontWeight:800,color:s.color,letterSpacing:2,marginBottom:8 }}>{s.label.toUpperCase()}</div>
                   <Mono size={20} color={s.color}>{fmtUSD(s.fdvV)}</Mono>
-                  <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginBottom:12 }}>FDV</div>
+                  <div style={{ fontFamily:"'IBM Plex Mono'",fontSize:9,color:C.muted,marginBottom:12 }}>FDV</div>
                   <Metric label="Token Price" value={fmtUSD(s.price)} color={s.color} size={13} style={{ marginBottom:8 }}/>
                   <Metric label="Your POLY"   value={fmtN(s.poly)}    color={s.color} size={13} style={{ marginBottom:8 }}/>
-                  <div style={{ padding:10, background:`${s.color}0d`, borderRadius:6, border:`1px solid ${s.color}33` }}>
+                  <div style={{ padding:10,background:`${s.color}0d`,borderRadius:6,border:`1px solid ${s.color}33` }}>
                     <Lbl>Your USD</Lbl>
                     <Mono size={20} color={s.color}>{fmtUSD(s.usd)}</Mono>
                   </div>
@@ -669,33 +517,30 @@ export default function App() {
             <Card accent={C.green}>
               <Lbl>Wallet Value by Scenario</Lbl>
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={scenarios.map(s=>({name:s.label,usd:s.usd}))} margin={{ top:10, right:10, bottom:5, left:10 }}>
-                  <XAxis dataKey="name" tick={{ fill:C.muted, fontSize:11, fontFamily:"'Syne'" }}/>
-                  <YAxis tick={{ fill:C.muted, fontSize:9, fontFamily:"'IBM Plex Mono'" }} tickFormatter={fmtUSD}/>
+                <BarChart data={scenarios.map(s=>({name:s.label,usd:s.usd}))} margin={{ top:10,right:10,bottom:5,left:10 }}>
+                  <XAxis dataKey="name" tick={{ fill:C.muted,fontSize:11,fontFamily:"'Syne'" }}/>
+                  <YAxis tick={{ fill:C.muted,fontSize:9,fontFamily:"'IBM Plex Mono'" }} tickFormatter={fmtUSD}/>
                   <Tooltip {...TOOLTIP_STYLE} formatter={v=>[fmtUSD(v),"Wallet Value"]}/>
-                  <Bar dataKey="usd" radius={[4,4,0,0]}>
-                    {scenarios.map((s,i)=><Cell key={i} fill={s.color} fillOpacity={0.85}/>)}
-                  </Bar>
+                  <Bar dataKey="usd" radius={[4,4,0,0]}>{scenarios.map((s,i)=><Cell key={i} fill={s.color} fillOpacity={0.85}/>)}</Bar>
                 </BarChart>
               </ResponsiveContainer>
             </Card>
           </div>
         )}
 
-        {/* ════════ LEADERBOARD — REAL POLYMARKET DATA ════════ */}
+        {/* ══════ LEADERBOARD — REAL POLYMARKET DATA ══════ */}
         {tab==="leaderboard" && (
           <div className="fu">
-            {/* Controls */}
             <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:14, flexWrap:"wrap" }}>
               <div>
                 <Lbl style={{ marginBottom:4 }}>Time Window</Lbl>
                 <div style={{ display:"flex", gap:4 }}>
                   {["1d","7d","30d","all"].map(w=>(
                     <button key={w} onClick={()=>setLbWindow(w)} style={{
-                      padding:"5px 12px", borderRadius:5, cursor:"pointer", fontFamily:"'Syne'", fontSize:11, letterSpacing:1,
-                      background: lbWindow===w ? C.green+"22" : C.surface,
-                      border: `1px solid ${lbWindow===w ? C.green+"66" : C.border2}`,
-                      color: lbWindow===w ? C.green : C.muted,
+                      padding:"5px 12px",borderRadius:5,cursor:"pointer",fontFamily:"'Syne'",fontSize:11,letterSpacing:1,
+                      background:lbWindow===w?C.green+"22":C.surface,
+                      border:`1px solid ${lbWindow===w?C.green+"66":C.border2}`,
+                      color:lbWindow===w?C.green:C.muted,
                     }}>{w.toUpperCase()}</button>
                   ))}
                 </div>
@@ -705,52 +550,58 @@ export default function App() {
                 <div style={{ display:"flex", gap:4 }}>
                   {["profit","volume"].map(o=>(
                     <button key={o} onClick={()=>setLbOrder(o)} style={{
-                      padding:"5px 12px", borderRadius:5, cursor:"pointer", fontFamily:"'Syne'", fontSize:11, letterSpacing:1,
-                      background: lbOrder===o ? C.teal+"22" : C.surface,
-                      border: `1px solid ${lbOrder===o ? C.teal+"66" : C.border2}`,
-                      color: lbOrder===o ? C.teal : C.muted,
+                      padding:"5px 12px",borderRadius:5,cursor:"pointer",fontFamily:"'Syne'",fontSize:11,letterSpacing:1,
+                      background:lbOrder===o?C.teal+"22":C.surface,
+                      border:`1px solid ${lbOrder===o?C.teal+"66":C.border2}`,
+                      color:lbOrder===o?C.teal:C.muted,
                     }}>{o.charAt(0).toUpperCase()+o.slice(1)}</button>
                   ))}
                 </div>
               </div>
               <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
-                {lbLoading && <Mono size={10} color={C.amber} className="pulse">Loading real Polymarket data…</Mono>}
-                {lbError   && <Mono size={10} color={C.red}>Error: {lbError}</Mono>}
-                <button onClick={fetchLeaderboard} style={{ padding:"5px 12px", borderRadius:5, background:C.surface, border:`1px solid ${C.border2}`, color:C.muted, fontFamily:"'Syne'", fontSize:10, cursor:"pointer" }}>↻ Refresh</button>
+                {lbLoading && <Mono size={10} color={C.amber}>Loading…</Mono>}
+                <button onClick={fetchLeaderboard} style={{ padding:"5px 12px",borderRadius:5,background:C.surface,border:`1px solid ${C.border2}`,color:C.muted,fontFamily:"'Syne'",fontSize:10,cursor:"pointer" }}>↻ Refresh</button>
               </div>
             </div>
 
+            {lbError && (
+              <div style={{ marginBottom:12, padding:"10px 14px", background:`${C.red}11`, border:`1px solid ${C.red}33`, borderRadius:7 }}>
+                <Mono size={11} color={C.red}>⚠ {lbError}</Mono>
+                <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:4 }}>
+                  The Polymarket leaderboard API may be temporarily unavailable. Try refreshing or switching the time window.
+                </div>
+              </div>
+            )}
+
             <Card accent={C.green}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-                <div style={{ fontFamily:"'Syne'", fontSize:12, fontWeight:700, color:C.green, letterSpacing:1.5, textTransform:"uppercase" }}>
+                <div style={{ fontFamily:"'Syne'",fontSize:12,fontWeight:700,color:C.green,letterSpacing:1.5,textTransform:"uppercase" }}>
                   Polymarket Leaderboard — Real Data
                 </div>
-                <Mono size={9} color={C.muted}>Source: data-api.polymarket.com/leaderboard · {lbWindow.toUpperCase()}</Mono>
+                <Mono size={9} color={C.muted}>data-api.polymarket.com/leaderboard · {lbWindow.toUpperCase()} · by {lbOrder}</Mono>
               </div>
 
-              {/* Header */}
-              <div style={{ display:"grid", gridTemplateColumns:"44px 180px 1fr 110px 80px", gap:8, padding:"0 8px 8px", borderBottom:`1px solid ${C.border}` }}>
-                {["#","Wallet / Name","Volume","Profit","Trades"].map(h=><Lbl key={h} style={{ marginBottom:0 }}>{h}</Lbl>)}
+              <div style={{ display:"grid", gridTemplateColumns:"44px 200px 1fr 120px 80px", gap:8, padding:"0 8px 8px", borderBottom:`1px solid ${C.border}` }}>
+                {["#","Wallet / Name","Volume","Profit / PnL","Trades"].map(h=><Lbl key={h} style={{ marginBottom:0 }}>{h}</Lbl>)}
               </div>
 
-              {lbLoading && !lbData.length && (
+              {lbLoading && !lbRows.length && (
                 <div style={{ textAlign:"center", padding:"40px 20px" }}>
-                  <Mono size={12} color={C.amber} className="pulse">Fetching live Polymarket leaderboard…</Mono>
+                  <Mono size={12} color={C.amber}>Fetching live Polymarket data…</Mono>
                 </div>
               )}
 
-              {!lbLoading && lbError && !lbData.length && (
+              {!lbLoading && !lbRows.length && (
                 <div style={{ textAlign:"center", padding:"40px 20px" }}>
-                  <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:12, color:C.red, marginBottom:8 }}>Failed to load: {lbError}</div>
-                  <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:10, color:C.muted }}>The Polymarket leaderboard API may be temporarily unavailable.</div>
+                  <Mono size={12} color={C.muted}>No data — try Refresh or a different window</Mono>
                 </div>
               )}
 
-              {lbData.map((row,i)=>(
+              {lbRows.map((row,i)=>(
                 <div key={i} style={{
-                  display:"grid", gridTemplateColumns:"44px 180px 1fr 110px 80px",
+                  display:"grid", gridTemplateColumns:"44px 200px 1fr 120px 80px",
                   gap:8, padding:"9px 8px", borderRadius:5,
-                  background: i<3 ? `${C.green}05` : "transparent",
+                  background:i<3?`${C.green}05`:"transparent",
                   borderBottom:`1px solid ${C.dimmed}55`,
                 }}>
                   <Mono size={12} color={i===0?C.amber:i<3?C.muted:C.dimmed}>
@@ -758,19 +609,15 @@ export default function App() {
                   </Mono>
                   <div>
                     <Mono size={11} color={C.text}>{row.pseudonym||row.name||fmtAddr(row.proxyWallet)}</Mono>
-                    {row.proxyWallet && <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted }}>{fmtAddr(row.proxyWallet)}</div>}
+                    {(row.pseudonym||row.name) && row.proxyWallet && (
+                      <div style={{ fontFamily:"'IBM Plex Mono'",fontSize:9,color:C.muted }}>{fmtAddr(row.proxyWallet)}</div>
+                    )}
                   </div>
                   <Mono size={11} color={C.blue}>{fmtUSD(row.volume)}</Mono>
                   <Mono size={11} color={row.profit>=0?C.green:C.red}>{row.profit>=0?"+":""}{fmtUSD(row.profit)}</Mono>
                   <Mono size={11} color={C.muted}>{row.numTrades>0?row.numTrades.toLocaleString():"—"}</Mono>
                 </div>
               ))}
-
-              {!lbLoading && !lbError && lbData.length===0 && (
-                <div style={{ textAlign:"center", padding:"40px 20px" }}>
-                  <Mono size={12} color={C.muted}>No data returned from API</Mono>
-                </div>
-              )}
             </Card>
           </div>
         )}
