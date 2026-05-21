@@ -1,52 +1,78 @@
-// value.js — Fixed with CORRECT field names from Polymarket positions API
-// Confirmed real response shape from docs:
-// { size, avgPrice, initialValue, currentValue, cashPnl, percentPnl,
-//   realizedPnl, curPrice, redeemable, title, outcome, ... }
+// value.js — Fixed PnL: combines open positions (unrealised) + closed positions (realised)
+// Fixes: showing -$8.95 instead of real -$264 because resolved markets were excluded
 
 exports.handler = async (event) => {
   const address = event.queryStringParameters?.address;
   if (!address) return { statusCode:400, body:JSON.stringify({error:"address required"}) };
 
+  const addr = encodeURIComponent(address);
+  const headers = { Accept:"application/json", "User-Agent":"PolyCalc/1.0" };
+
+  // ── 1. Open positions → current portfolio value + unrealised PnL
+  let portfolioValue = 0;
+  let initialValue   = 0;
+  let cashPnl        = 0;        // unrealised PnL on open positions
+  let positionCount  = 0;
+
   try {
-    const url = `https://data-api.polymarket.com/positions?user=${encodeURIComponent(address)}&sizeThreshold=0.01&limit=500`;
-    const res = await fetch(url, { headers:{ Accept:"application/json", "User-Agent":"PolyCalc/1.0" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(
+      `https://data-api.polymarket.com/positions?user=${addr}&sizeThreshold=0.01&limit=500`,
+      { headers }
+    );
+    if (res.ok) {
+      const items = await res.json();
+      const arr = Array.isArray(items) ? items : [];
+      arr.forEach(p => {
+        portfolioValue += Number(p.currentValue ?? 0);
+        initialValue   += Number(p.initialValue ?? 0);
+        cashPnl        += Number(p.cashPnl      ?? 0);
+      });
+      positionCount = arr.length;
+    }
+  } catch (_) {}
 
-    const data  = await res.json();
-    const items = Array.isArray(data) ? data : [];
+  // ── 2. Closed/resolved positions → realised PnL (this is what the real LB counts)
+  // Paginate because users can have hundreds of resolved markets
+  let realizedPnl = 0;
+  let closedCount = 0;
+  let closedPage  = 0;
+  const PAGE = 500;
 
-    let portfolioValue = 0; // sum of currentValue (what holdings are worth now)
-    let initialValue   = 0; // sum of initialValue (what was paid)
-    let cashPnl        = 0; // sum of cashPnl (unrealised)
-    let realizedPnl    = 0; // sum of realizedPnl (realised from closed portions)
+  try {
+    while (closedPage < 10) { // max 5,000 closed positions
+      const res = await fetch(
+        `https://data-api.polymarket.com/closed-positions?user=${addr}&limit=${PAGE}&offset=${closedPage * PAGE}`,
+        { headers }
+      );
+      if (!res.ok) break;
 
-    items.forEach(p => {
-      portfolioValue += Number(p.currentValue  ?? 0);
-      initialValue   += Number(p.initialValue  ?? 0);
-      cashPnl        += Number(p.cashPnl       ?? 0);
-      realizedPnl    += Number(p.realizedPnl   ?? 0);
-    });
+      const batch = await res.json();
+      const items = Array.isArray(batch) ? batch : [];
 
-    const totalPnl       = cashPnl + realizedPnl;
-    const positionCount  = items.length;
+      items.forEach(p => {
+        // closed-positions may use realizedPnl or cashPnl
+        realizedPnl += Number(p.realizedPnl ?? p.cashPnl ?? p.profit ?? 0);
+      });
+      closedCount += items.length;
 
-    return {
-      statusCode: 200,
-      headers: { "Content-Type":"application/json", "Access-Control-Allow-Origin":"*" },
-      body: JSON.stringify({
-        portfolioValue,   // current market value of open positions
-        initialValue,     // total USDC spent on open positions
-        cashPnl,          // unrealised PnL
-        realizedPnl,      // realised PnL
-        totalPnl,         // cashPnl + realizedPnl
-        positionCount,
-      }),
-    };
-  } catch (err) {
-    return {
-      statusCode: 500,
-      headers: { "Access-Control-Allow-Origin":"*" },
-      body: JSON.stringify({ error: err.message }),
-    };
-  }
+      if (items.length < PAGE) break;
+      closedPage++;
+    }
+  } catch (_) {}
+
+  const totalPnl = cashPnl + realizedPnl;
+
+  return {
+    statusCode: 200,
+    headers: { "Content-Type":"application/json", "Access-Control-Allow-Origin":"*" },
+    body: JSON.stringify({
+      portfolioValue,   // current open position value
+      initialValue,
+      cashPnl,          // unrealised (open positions)
+      realizedPnl,      // realised (closed/resolved positions)
+      totalPnl,         // what Polymarket shows as P&L on leaderboard
+      positionCount,
+      closedCount,
+    }),
+  };
 };
