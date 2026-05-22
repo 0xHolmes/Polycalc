@@ -1,10 +1,10 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, ReferenceLine,
+  ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import { useWalletData }                          from "./hooks/useWalletData.js";
-import { computeAirdrop, computeLPScores, lpOrderScore, fmtN, fmtUSD, fmtAddr } from "./lib/formulas.js";
+import { computeAirdrop, fmtN, fmtUSD, fmtAddr } from "./lib/formulas.js";
 import { C, Card, Lbl, Mono, Metric, MultTag, Toggle, Slider, TabBar, TOOLTIP_STYLE } from "./components/UI.jsx";
 
 const SCENARIOS = [
@@ -16,7 +16,6 @@ const SCENARIOS = [
 
 const TABS = [
   { id:"checker",     label:"Airdrop Checker" },
-  { id:"lpscore",     label:"LP Calculator"   },
   { id:"simulator",   label:"Tokenomics"       },
   { id:"scenarios",   label:"Scenarios"        },
   { id:"leaderboard", label:"Leaderboard"      },
@@ -47,13 +46,6 @@ export default function App() {
   const [totalPlatVol, setTotalPlatVol] = useState(15_000_000_000);
   const [totalPlatLP,  setTotalPlatLP]  = useState(50_000_000);
 
-  // ── LP calc
-  const [lpV, setLpV]       = useState(3);
-  const [lpSBid, setLpSBid] = useState(1);
-  const [lpSAsk, setLpSAsk] = useState(1.2);
-  const [lpBid, setLpBid]   = useState(200);
-  const [lpAsk, setLpAsk]   = useState(200);
-  const [lpMid, setLpMid]   = useState(0.50);
 
   // ── Real leaderboard
   const [lbRows,    setLbRows]    = useState([]);
@@ -90,15 +82,6 @@ export default function App() {
   }), [userVolume, userPnL, userLPRewards, totalPlatVol, totalPlatLP,
        totalSupply, airdropPct, lpAllocPct, isEarlyUser, isEarlyLP]);
 
-  // ── LP calc
-  const lpResult = useMemo(() => computeLPScores({
-    maxSpread: lpV, bidSpread: lpSBid, askSpread: lpSAsk,
-    bidSize: lpBid, askSize: lpAsk, midpoint: lpMid,
-  }), [lpV, lpSBid, lpSAsk, lpBid, lpAsk, lpMid]);
-
-  const spreadCurve = useMemo(() =>
-    Array.from({length:31},(_,i)=>{const s=i/30*lpV;return{s:s.toFixed(1),score:(lpOrderScore(lpV,s,1)*100).toFixed(1)};})
-  , [lpV]);
 
   const emitData = useMemo(() =>
     Array.from({length:12},(_,i)=>({month:`M${i+1}`,circ:Math.round(totalSupply*(0.20+0.80*(1-Math.exp(-(i+1)*0.22))))}))
@@ -263,7 +246,7 @@ export default function App() {
                   <input type="number" value={useManual?manualPnL:(fetchedPnL??manualPnL)} disabled={!useManual&&fetchedPnL!==null} onChange={e=>setManualPnL(Number(e.target.value))}/>
                   <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>
                     {fetchedPnL!==null
-                      ? `Unrealised: $${(walletData?.cashPnl??0).toFixed(2)} · Realised: $${(walletData?.realizedPnl??0).toFixed(2)} · ${walletData?.positionCount??0} open + ${walletData?.closedCount??0} closed`
+                      ? `Buys: $${(walletData?.totalBuys??0).toFixed(0)} · Sells: $${(walletData?.totalSells??0).toFixed(0)} · Redeems: $${(walletData?.totalRedeems??0).toFixed(0)} · Portfolio: $${(walletData?.portfolioValue??0).toFixed(2)}`
                       : "Positive = profitable trader (1.25× multiplier)"}
                   </div>
                 </div>
@@ -395,62 +378,6 @@ export default function App() {
                 <span style={{color:C.green}}>total_poly</span> = (trading_alloc + lp_alloc) × multiplier
               </div>
             </Card>
-          </div>
-        )}
-
-        {/* ══════ LP CALCULATOR ══════ */}
-        {tab==="lpscore" && (
-          <div className="fu">
-            <div className="g2" style={{ marginBottom:14 }}>
-              <Card accent={C.teal}>
-                {sect("LP Order Parameters")}
-                <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:10, color:C.muted, padding:"8px 10px", background:C.surface, borderRadius:6, border:`1px solid ${C.border}`, marginBottom:14, lineHeight:1.9 }}>
-                  Official formula (docs.polymarket.com):<br/>
-                  <span style={{color:C.teal}}>S(v,s) = ((v−s)/v)² × size</span><br/>
-                  <span style={{color:C.muted}}>v=max_spread · s=your spread from midpoint · 10,080 samples/epoch</span>
-                </div>
-                <Slider label="Max Spread v (cents)"    value={lpV}    min={0.5} max={10}   step={0.5} fmt={v=>v+"¢"}            onChange={setLpV}    color={C.teal}/>
-                <Slider label="Bid Spread s (cents)"    value={lpSBid} min={0}   max={lpV}  step={0.1} fmt={v=>v.toFixed(1)+"¢"} onChange={v=>setLpSBid(Math.min(v,lpV))} color={C.blue}/>
-                <Slider label="Ask Spread s (cents)"    value={lpSAsk} min={0}   max={lpV}  step={0.1} fmt={v=>v.toFixed(1)+"¢"} onChange={v=>setLpSAsk(Math.min(v,lpV))} color={C.blue}/>
-                <Slider label="Bid Size (shares)"       value={lpBid}  min={10}  max={5000} step={10}  fmt={v=>v.toLocaleString()} onChange={setLpBid}  color={C.amber}/>
-                <Slider label="Ask Size (shares)"       value={lpAsk}  min={10}  max={5000} step={10}  fmt={v=>v.toLocaleString()} onChange={setLpAsk}  color={C.amber}/>
-                <Slider label="Market Midpoint"         value={lpMid}  min={0.01} max={0.99} step={0.01} fmt={v=>(v*100).toFixed(0)+"¢"} onChange={setLpMid} color={C.purple}/>
-                <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, marginTop:4, color:(lpMid<0.10||lpMid>0.90)?C.red:C.muted }}>
-                  {lpMid<0.10||lpMid>0.90 ? "⚠ Outside [10¢,90¢] — must be two-sided to score" : "In [10¢,90¢] — single-sided scores at 1/3×"}
-                </div>
-              </Card>
-              <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-                <Card accent={C.green}>
-                  {sect("Score Results")}
-                  <div className="g2">
-                    <Metric label="Bid Score" value={lpOrderScore(lpV,lpSBid,lpBid).toFixed(3)} color={C.blue}  sub={`S(${lpV},${lpSBid})×${lpBid}`} size={16}/>
-                    <Metric label="Ask Score" value={lpOrderScore(lpV,lpSAsk,lpAsk).toFixed(3)} color={C.teal}  sub={`S(${lpV},${lpSAsk})×${lpAsk}`} size={16}/>
-                    <Metric label="Qone"  value={lpResult.Qone.toFixed(3)} color={C.text} sub="first side"  size={16}/>
-                    <Metric label="Qtwo"  value={lpResult.Qtwo.toFixed(3)} color={C.text} sub="second side" size={16}/>
-                    <Metric label="Qmin (per sample)" value={lpResult.Qmin.toFixed(3)}  color={C.green} size={18}/>
-                    <Metric label="Epoch Score"       value={fmtN(lpResult.epochScore)} color={C.amber} sub="×10,080 samples" size={18}/>
-                  </div>
-                  <div style={{ marginTop:12, padding:"10px 12px", background:C.surface, borderRadius:8, border:`1px solid ${C.border}`, fontFamily:"'IBM Plex Mono'", fontSize:11, color:C.muted, lineHeight:2 }}>
-                    Bid: (({lpV}−{lpSBid})/{lpV})²×{lpBid} = <span style={{color:C.blue}}>{lpOrderScore(lpV,lpSBid,lpBid).toFixed(4)}</span><br/>
-                    Ask: (({lpV}−{lpSAsk})/{lpV})²×{lpAsk} = <span style={{color:C.teal}}>{lpOrderScore(lpV,lpSAsk,lpAsk).toFixed(4)}</span><br/>
-                    Epoch = {lpResult.Qmin.toFixed(3)} × 10,080 = <span style={{color:C.amber}}>{fmtN(lpResult.epochScore)}</span>
-                  </div>
-                </Card>
-                <Card accent={C.blue}>
-                  <Lbl>Quadratic Decay Curve</Lbl>
-                  <ResponsiveContainer width="100%" height={190}>
-                    <LineChart data={spreadCurve} margin={{ top:5,right:5,left:0,bottom:16 }}>
-                      <XAxis dataKey="s" tick={{ fill:C.muted,fontSize:9,fontFamily:"'IBM Plex Mono'" }} label={{ value:"spread (¢)",fill:C.muted,fontSize:9,position:"insideBottom",offset:-8 }}/>
-                      <YAxis tick={{ fill:C.muted,fontSize:9,fontFamily:"'IBM Plex Mono'" }} tickFormatter={v=>v+"%"}/>
-                      <Tooltip {...TOOLTIP_STYLE} formatter={v=>[v+"%","Score"]} labelFormatter={v=>`${v}¢`}/>
-                      <Line type="monotone" dataKey="score" stroke={C.teal} strokeWidth={2} dot={false}/>
-                      <ReferenceLine x={String(lpSBid.toFixed(1))} stroke={C.blue}  strokeDasharray="3 3"/>
-                      <ReferenceLine x={String(lpSAsk.toFixed(1))} stroke={C.amber} strokeDasharray="3 3"/>
-                    </LineChart>
-                  </ResponsiveContainer>
-                </Card>
-              </div>
-            </div>
           </div>
         )}
 
