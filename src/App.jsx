@@ -252,7 +252,7 @@ export default function App() {
                   <input type="number" value={useManual?manualVol:(fetchedVol??manualVol)} disabled={!useManual&&fetchedVol!==null} onChange={e=>setManualVol(Number(e.target.value))}/>
                   <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>
                     {fetchedVol!==null
-                      ? `API: $${fetchedVol.toLocaleString(undefined,{maximumFractionDigits:2})} from ${walletData?.tradeCount??0} trades`
+                      ? `API: $${fetchedVol.toLocaleString(undefined,{maximumFractionDigits:2})} shares (${walletData?.tradeCount??0} trades, USDC: $${(walletData?.volumeUsdc??0).toLocaleString(undefined,{maximumFractionDigits:2})})`
                       : "Total USDC traded on Polymarket"}
                   </div>
                 </div>
@@ -581,7 +581,7 @@ export default function App() {
                 <Mono size={9} color={C.muted}>data-api.polymarket.com/leaderboard · {lbWindow.toUpperCase()} · by {lbOrder}</Mono>
               </div>
 
-              <div style={{ display:"grid", gridTemplateColumns:"44px 200px 1fr 120px", gap:8, padding:"0 8px 8px", borderBottom:`1px solid ${C.border}` }}>
+              <div style={{ display:"grid", gridTemplateColumns:"44px minmax(0,200px) 120px 130px", gap:8, padding:"0 8px 8px", borderBottom:`1px solid ${C.border}` }}>
                 {["#","Wallet / Name","Volume","Profit / PnL"].map(h=><Lbl key={h} style={{ marginBottom:0 }}>{h}</Lbl>)}
               </div>
 
@@ -599,7 +599,7 @@ export default function App() {
 
               {lbRows.map((row,i)=>(
                 <div key={i} style={{
-                  display:"grid", gridTemplateColumns:"44px 200px 1fr 120px",
+                  display:"grid", gridTemplateColumns:"44px minmax(0,200px) 120px 130px",
                   gap:8, padding:"9px 8px", borderRadius:5,
                   background:i<3?`${C.green}05`:"transparent",
                   borderBottom:`1px solid ${C.dimmed}55`,
@@ -607,10 +607,12 @@ export default function App() {
                   <Mono size={12} color={i===0?C.amber:i<3?C.muted:C.dimmed}>
                     {i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${row.rank}`}
                   </Mono>
-                  <div>
-                    <Mono size={11} color={C.text}>{row.name||fmtAddr(row.proxyWallet)}</Mono>
+                  <div style={{ overflow:"hidden", minWidth:0 }}>
+                    <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:11, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {row.name||fmtAddr(row.proxyWallet)}
+                    </div>
                     {row.name && row.proxyWallet && (
-                      <div style={{ fontFamily:"'IBM Plex Mono'",fontSize:9,color:C.muted }}>{fmtAddr(row.proxyWallet)}</div>
+                      <div style={{ fontFamily:"'IBM Plex Mono'",fontSize:9,color:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{fmtAddr(row.proxyWallet)}</div>
                     )}
                   </div>
                   <Mono size={11} color={C.blue}>{fmtUSD(row.volume)}</Mono>
