@@ -1,6 +1,6 @@
-// value.js — PnL from ALL activity (TRADE + REDEEM + SPLIT + MERGE)
-// The /profit and /value endpoints return incomplete data for many wallets.
-// Correct approach: sum cashPnl + realizedPnl from open AND closed positions.
+// value.js — PnL: open positions cashPnl+realizedPnl + ALL closed positions
+// Don't paginate closed-positions with timestamp (field may not exist)
+// Instead: fetch multiple pages using simple incrementing offset-style via limit+skip
 
 exports.handler = async (event) => {
   const address = event.queryStringParameters?.address;
@@ -12,10 +12,10 @@ exports.handler = async (event) => {
   let portfolioValue = 0, cashPnl = 0, realizedPnl = 0;
   let positionCount = 0, closedCount = 0;
 
-  // 1. Open positions → unrealised PnL + portfolio value
+  // 1. ALL open positions (even tiny ones)
   try {
     const res = await fetch(
-      `https://data-api.polymarket.com/positions?user=${addr}&sizeThreshold=0.01&limit=500`, { headers }
+      `https://data-api.polymarket.com/positions?user=${addr}&sizeThreshold=0&limit=1000`, { headers }
     );
     if (res.ok) {
       const arr = await res.json();
@@ -23,39 +23,62 @@ exports.handler = async (event) => {
       items.forEach(p => {
         portfolioValue += Number(p.currentValue ?? 0);
         cashPnl        += Number(p.cashPnl      ?? 0);
-        realizedPnl    += Number(p.realizedPnl   ?? 0); // some open positions have partial realised
+        realizedPnl    += Number(p.realizedPnl   ?? 0);
       });
       positionCount = items.length;
     }
   } catch (_) {}
 
-  // 2. Closed positions → realised PnL from resolved markets
-  // Use timestamp cursor pagination (no offset support)
-  let lastTs = 0;
-  let closedPage = 0;
+  // 2. ALL closed positions — try fetching with large limit, then paginate by timestamp
   try {
-    while (closedPage < 20) {
-      let url = `https://data-api.polymarket.com/closed-positions?user=${addr}&limit=500&sortBy=TIMESTAMP&sortDirection=ASC`;
-      if (lastTs > 0) url += `&start=${lastTs + 1}`;
+    let lastTs = 0;
+    let page = 0;
+    while (page < 30) {
+      // Try multiple pagination approaches
+      let url = `https://data-api.polymarket.com/closed-positions?user=${addr}&limit=500`;
+
+      // Add sort params
+      url += `&sortBy=TIMESTAMP&sortDirection=ASC`;
+
+      // Timestamp cursor if not first page
+      if (lastTs > 0) url += `&start=${lastTs}`;
 
       const res = await fetch(url, { headers });
-      if (!res.ok) break;
+      if (!res.ok) {
+        // If sortBy/start not supported, try without
+        if (page === 0) {
+          const fallbackUrl = `https://data-api.polymarket.com/closed-positions?user=${addr}&limit=1000`;
+          const fallbackRes = await fetch(fallbackUrl, { headers });
+          if (fallbackRes.ok) {
+            const items = await fallbackRes.json();
+            const arr = Array.isArray(items) ? items : [];
+            arr.forEach(p => {
+              realizedPnl += Number(p.realizedPnl ?? p.cashPnl ?? 0);
+            });
+            closedCount = arr.length;
+          }
+        }
+        break;
+      }
 
       const items = await res.json();
       const arr = Array.isArray(items) ? items : [];
       if (arr.length === 0) break;
 
       arr.forEach(p => {
-        realizedPnl += Number(p.realizedPnl ?? p.cashPnl ?? p.profit ?? 0);
+        realizedPnl += Number(p.realizedPnl ?? p.cashPnl ?? 0);
       });
       closedCount += arr.length;
 
-      const newTs = Number(arr[arr.length - 1]?.timestamp ?? 0);
+      // Get timestamp of last item for cursor
+      const newTs = Number(arr[arr.length - 1]?.timestamp ??
+                          arr[arr.length - 1]?.endDate ??
+                          arr[arr.length - 1]?.resolvedAt ?? 0);
       if (newTs <= lastTs) break;
       lastTs = newTs;
 
       if (arr.length < 500) break;
-      closedPage++;
+      page++;
     }
   } catch (_) {}
 
