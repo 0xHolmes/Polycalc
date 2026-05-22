@@ -252,7 +252,7 @@ export default function App() {
                   <input type="number" value={useManual?manualVol:(fetchedVol??manualVol)} disabled={!useManual&&fetchedVol!==null} onChange={e=>setManualVol(Number(e.target.value))}/>
                   <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>
                     {fetchedVol!==null
-                      ? `API: $${fetchedVol.toLocaleString(undefined,{maximumFractionDigits:2})} from ${walletData?.tradeCount??0} TRADE events${walletData?.tradeCount>=500?" (capped at 500)":""}`
+                      ? `API: $${fetchedVol.toLocaleString(undefined,{maximumFractionDigits:2})} from ${walletData?.tradeCount??0} trades`
                       : "Total USDC traded on Polymarket"}
                   </div>
                 </div>
@@ -263,7 +263,7 @@ export default function App() {
                   <input type="number" value={useManual?manualPnL:(fetchedPnL??manualPnL)} disabled={!useManual&&fetchedPnL!==null} onChange={e=>setManualPnL(Number(e.target.value))}/>
                   <div style={{ fontFamily:"'IBM Plex Mono'", fontSize:9, color:C.muted, marginTop:3 }}>
                     {fetchedPnL!==null
-                      ? `Unrealised: $${(walletData?.cashPnl??0).toFixed(2)} · Realised: $${(walletData?.realizedPnl??0).toFixed(2)} · Portfolio: $${(walletData?.portfolioValue??0).toFixed(2)}`
+                      ? `Unrealised: $${(walletData?.cashPnl??0).toFixed(2)} · Realised: $${(walletData?.realizedPnl??0).toFixed(2)} · ${walletData?.positionCount??0} open + ${walletData?.closedCount??0} closed`
                       : "Positive = profitable trader (1.25× multiplier)"}
                   </div>
                 </div>
