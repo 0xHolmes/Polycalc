@@ -37,23 +37,22 @@ export function useWalletData() {
       out.volumeTraded           = Number(json.volumeTraded ?? 0);
       out.tradeCount             = Number(json.tradeCount   ?? 0);
       out.earliestTradeTimestamp = json.earliestTradeTimestamp ?? null;
-      const src = json.source ? ` [${json.source}]` : "";
-      log.push(`✓ Volume: $${out.volumeTraded.toLocaleString(undefined,{maximumFractionDigits:2})}${out.tradeCount ? ` (${out.tradeCount} trades)` : ""}${src}`);
+      const pages = json.pagesLoaded ? `, ${json.pagesLoaded} pages` : "";
+      log.push(`✓ Volume: $${out.volumeTraded.toLocaleString(undefined,{maximumFractionDigits:2})} (${out.tradeCount} trades${pages})`);
     } catch(e) { out.volumeTraded = null; log.push(`✗ Volume: ${e.message}`); }
 
-    // 3. Portfolio + PnL (from positions with CORRECT field names)
+    // 3. Portfolio + PnL (open positions + closed positions)
     try {
       const res  = await fetch(`${BASE}/value?address=${addr}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      // value.js now returns: portfolioValue, initialValue, cashPnl, realizedPnl, totalPnl
       out.portfolioValue = Number(json.portfolioValue ?? 0);
-      out.initialValue   = Number(json.initialValue   ?? 0);
       out.cashPnl        = Number(json.cashPnl        ?? 0);
       out.realizedPnl    = Number(json.realizedPnl    ?? 0);
       out.totalPnl       = Number(json.totalPnl       ?? 0);
       out.positionCount  = Number(json.positionCount  ?? 0);
-      log.push(`✓ Portfolio: $${out.portfolioValue.toFixed(2)} | PnL: $${out.totalPnl.toFixed(2)} (${out.positionCount} positions)`);
+      out.closedCount    = Number(json.closedCount    ?? 0);
+      log.push(`✓ Portfolio: $${out.portfolioValue.toFixed(2)} | PnL: $${out.totalPnl.toFixed(2)} (${out.positionCount} open + ${out.closedCount} closed)`);
     } catch(e) { out.portfolioValue = null; out.totalPnl = null; log.push(`✗ Portfolio: ${e.message}`); }
 
     // 4. LP rewards (REWARD-type activity)
