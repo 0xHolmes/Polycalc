@@ -581,8 +581,8 @@ export default function App() {
                 <Mono size={9} color={C.muted}>data-api.polymarket.com/leaderboard · {lbWindow.toUpperCase()} · by {lbOrder}</Mono>
               </div>
 
-              <div style={{ display:"grid", gridTemplateColumns:"44px 200px 1fr 120px 80px", gap:8, padding:"0 8px 8px", borderBottom:`1px solid ${C.border}` }}>
-                {["#","Wallet / Name","Volume","Profit / PnL","Trades"].map(h=><Lbl key={h} style={{ marginBottom:0 }}>{h}</Lbl>)}
+              <div style={{ display:"grid", gridTemplateColumns:"44px 200px 1fr 120px", gap:8, padding:"0 8px 8px", borderBottom:`1px solid ${C.border}` }}>
+                {["#","Wallet / Name","Volume","Profit / PnL"].map(h=><Lbl key={h} style={{ marginBottom:0 }}>{h}</Lbl>)}
               </div>
 
               {lbLoading && !lbRows.length && (
@@ -599,7 +599,7 @@ export default function App() {
 
               {lbRows.map((row,i)=>(
                 <div key={i} style={{
-                  display:"grid", gridTemplateColumns:"44px 200px 1fr 120px 80px",
+                  display:"grid", gridTemplateColumns:"44px 200px 1fr 120px",
                   gap:8, padding:"9px 8px", borderRadius:5,
                   background:i<3?`${C.green}05`:"transparent",
                   borderBottom:`1px solid ${C.dimmed}55`,
@@ -608,14 +608,13 @@ export default function App() {
                     {i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${row.rank}`}
                   </Mono>
                   <div>
-                    <Mono size={11} color={C.text}>{row.pseudonym||row.name||fmtAddr(row.proxyWallet)}</Mono>
-                    {(row.pseudonym||row.name) && row.proxyWallet && (
+                    <Mono size={11} color={C.text}>{row.name||fmtAddr(row.proxyWallet)}</Mono>
+                    {row.name && row.proxyWallet && (
                       <div style={{ fontFamily:"'IBM Plex Mono'",fontSize:9,color:C.muted }}>{fmtAddr(row.proxyWallet)}</div>
                     )}
                   </div>
                   <Mono size={11} color={C.blue}>{fmtUSD(row.volume)}</Mono>
-                  <Mono size={11} color={row.profit>=0?C.green:C.red}>{row.profit>=0?"+":""}{fmtUSD(row.profit)}</Mono>
-                  <Mono size={11} color={C.muted}>{row.numTrades>0?row.numTrades.toLocaleString():"—"}</Mono>
+                  <Mono size={11} color={row.pnl>=0?C.green:C.red}>{row.pnl>=0?"+":""}{fmtUSD(row.pnl)}</Mono>
                 </div>
               ))}
             </Card>
