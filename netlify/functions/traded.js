@@ -1,6 +1,8 @@
-// traded.js — Use the DIRECT /traded endpoint (what Polymarket CLI uses)
-// `polymarket data traded 0xWALLET` → GET /traded?user=ADDRESS
-// This returns the official total volume, no summing needed.
+// traded.js — Volume via timestamp-cursor pagination on /activity
+// The /traded endpoint returns incorrect values for many wallets.
+// The /activity endpoint doesn't support offset — use start/end timestamps.
+// Confirmed params from Polymarket Notion docs:
+//   user, type, start, end, sortBy, sortDirection, limit (no offset!)
 
 exports.handler = async (event) => {
   const address = event.queryStringParameters?.address;
@@ -8,79 +10,64 @@ exports.handler = async (event) => {
 
   const addr = encodeURIComponent(address);
   const headers = { Accept:"application/json", "User-Agent":"PolyCalc/1.0" };
-  let result = {};
 
-  // Try the direct /traded endpoint first (official, used by Polymarket CLI)
+  let allItems = [];
+  let lastTimestamp = 0; // cursor: fetch trades after this timestamp
+  let pageCount = 0;
+  const MAX_PAGES = 20; // up to 10,000 trades
+
   try {
-    const res = await fetch(`https://data-api.polymarket.com/traded?user=${addr}`, { headers });
-    if (res.ok) {
-      const raw = await res.json();
-      // Response can be a number, an object, or have various field names
-      const vol = typeof raw === "number" ? raw
-        : Number(raw?.volumeTraded ?? raw?.volume ?? raw?.totalVolume ?? raw?.traded ?? raw ?? 0);
-      if (vol > 0) {
-        result.volumeTraded = vol;
-        result.source = "traded";
-      }
+    while (pageCount < MAX_PAGES) {
+      // Use start= for cursor pagination (trades after lastTimestamp)
+      let url = `https://data-api.polymarket.com/activity?user=${addr}&type=TRADE&limit=500&sortBy=TIMESTAMP&sortDirection=ASC`;
+      if (lastTimestamp > 0) url += `&start=${lastTimestamp + 1}`;
+
+      const res = await fetch(url, { headers });
+      if (!res.ok) break;
+
+      const batch = await res.json();
+      const items = Array.isArray(batch) ? batch : [];
+      if (items.length === 0) break;
+
+      allItems = allItems.concat(items);
+
+      // Update cursor to last item's timestamp
+      const lastItem = items[items.length - 1];
+      const newTs = Number(lastItem.timestamp ?? 0);
+      if (newTs <= lastTimestamp) break; // stuck, prevent infinite loop
+      lastTimestamp = newTs;
+
+      if (items.length < 500) break; // partial page = done
+      pageCount++;
     }
-  } catch(_) {}
 
-  // If /traded returned 0 or failed, try /profit endpoint which also has volume
-  if (!result.volumeTraded) {
-    try {
-      const res = await fetch(`https://data-api.polymarket.com/profit?user=${addr}`, { headers });
-      if (res.ok) {
-        const raw = await res.json();
-        const vol = Number(raw?.volume ?? raw?.volumeTraded ?? 0);
-        if (vol > 0) {
-          result.volumeTraded = vol;
-          result.source = "profit";
-        }
-        // Also grab PnL while we're here
-        result.profitFromEndpoint = Number(raw?.profit ?? raw?.pnl ?? 0);
-      }
-    } catch(_) {}
+    // Sum volume: usdcSize is the USDC amount per trade
+    const volumeTraded = allItems.reduce((s, t) => {
+      const usdc = Number(t.usdcSize);
+      if (usdc > 0) return s + usdc;
+      const calc = Number(t.size) * Number(t.price);
+      return s + (calc > 0 ? calc : 0);
+    }, 0);
+
+    const tradeCount = allItems.length;
+    const timestamps = allItems.map(t => t.timestamp).filter(Boolean);
+    const earliestTradeTimestamp = timestamps.length ? Math.min(...timestamps) : null;
+
+    return {
+      statusCode: 200,
+      headers: { "Content-Type":"application/json", "Access-Control-Allow-Origin":"*" },
+      body: JSON.stringify({
+        volumeTraded,
+        tradeCount,
+        earliestTradeTimestamp,
+        pagesLoaded: pageCount + 1,
+      }),
+    };
+  } catch (err) {
+    return {
+      statusCode: 500,
+      headers: { "Access-Control-Allow-Origin":"*" },
+      body: JSON.stringify({ error: err.message }),
+    };
   }
-
-  // Fallback: sum from activity (paginated, up to 3000 trades)
-  if (!result.volumeTraded) {
-    try {
-      let all = [];
-      for (let page = 0; page < 6; page++) {
-        const url = `https://data-api.polymarket.com/activity?user=${addr}&type=TRADE&limit=500&offset=${page*500}&sortBy=TIMESTAMP&sortDirection=ASC`;
-        const res = await fetch(url, { headers });
-        if (!res.ok) break;
-        const batch = await res.json();
-        const items = Array.isArray(batch) ? batch : [];
-        all = all.concat(items);
-        if (items.length < 500) break;
-      }
-      result.volumeTraded = all.reduce((s,t) => {
-        const u = Number(t.usdcSize); const c = Number(t.size)*Number(t.price);
-        return s + (u > 0 ? u : c > 0 ? c : 0);
-      }, 0);
-      result.tradeCount = all.length;
-      result.source = "activity";
-      const ts = all.map(t=>t.timestamp).filter(Boolean);
-      result.earliestTradeTimestamp = ts.length ? Math.min(...ts) : null;
-    } catch(_) {}
-  }
-
-  // Also get earliest trade timestamp if we don't have it yet
-  if (!result.earliestTradeTimestamp) {
-    try {
-      const res = await fetch(`https://data-api.polymarket.com/activity?user=${addr}&type=TRADE&limit=1&sortBy=TIMESTAMP&sortDirection=ASC`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        const items = Array.isArray(data) ? data : [];
-        if (items.length) result.earliestTradeTimestamp = items[0].timestamp ?? null;
-      }
-    } catch(_) {}
-  }
-
-  return {
-    statusCode: 200,
-    headers: { "Content-Type":"application/json", "Access-Control-Allow-Origin":"*" },
-    body: JSON.stringify(result),
-  };
 };
