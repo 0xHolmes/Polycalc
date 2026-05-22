@@ -35,6 +35,7 @@ export function useWalletData() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       out.volumeTraded           = Number(json.volumeTraded ?? 0);
+      out.volumeUsdc             = Number(json.volumeUsdc   ?? 0);
       out.tradeCount             = Number(json.tradeCount   ?? 0);
       out.earliestTradeTimestamp = json.earliestTradeTimestamp ?? null;
       const pages = json.pagesLoaded ? `, ${json.pagesLoaded} pages` : "";
