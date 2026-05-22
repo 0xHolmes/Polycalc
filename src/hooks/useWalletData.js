@@ -42,19 +42,21 @@ export function useWalletData() {
       log.push(`✓ Volume: $${out.volumeTraded.toLocaleString(undefined,{maximumFractionDigits:2})} (${out.tradeCount} trades${pages})`);
     } catch(e) { out.volumeTraded = null; log.push(`✗ Volume: ${e.message}`); }
 
-    // 3. Portfolio + PnL (open positions + closed positions)
+    // 3. PnL via cashflow replay (buys/sells/redeems)
     try {
       const res  = await fetch(`${BASE}/value?address=${addr}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       out.portfolioValue = Number(json.portfolioValue ?? 0);
-      out.cashPnl        = Number(json.cashPnl        ?? 0);
-      out.realizedPnl    = Number(json.realizedPnl    ?? 0);
       out.totalPnl       = Number(json.totalPnl       ?? 0);
+      out.realizedPnl    = Number(json.realizedPnl    ?? 0);
+      out.totalBuys      = Number(json.totalBuys      ?? 0);
+      out.totalSells     = Number(json.totalSells     ?? 0);
+      out.totalRedeems   = Number(json.totalRedeems   ?? 0);
       out.positionCount  = Number(json.positionCount  ?? 0);
-      out.closedCount    = Number(json.closedCount    ?? 0);
-      log.push(`✓ Portfolio: $${out.portfolioValue.toFixed(2)} | PnL: $${out.totalPnl.toFixed(2)} (${out.positionCount} open + ${out.closedCount} closed)`);
-    } catch(e) { out.portfolioValue = null; out.totalPnl = null; log.push(`✗ Portfolio: ${e.message}`); }
+      out.activityCount  = Number(json.activityCount  ?? 0);
+      log.push(`✓ PnL: $${out.totalPnl.toFixed(2)} (buys: $${out.totalBuys.toFixed(0)} · sells: $${out.totalSells.toFixed(0)} · redeems: $${out.totalRedeems.toFixed(0)} · portfolio: $${out.portfolioValue.toFixed(2)})`);
+    } catch(e) { out.portfolioValue = null; out.totalPnl = null; log.push(`✗ PnL: ${e.message}`); }
 
     // 4. LP rewards (REWARD-type activity)
     try {
