@@ -37,7 +37,8 @@ export function useWalletData() {
       out.volumeTraded           = Number(json.volumeTraded ?? 0);
       out.tradeCount             = Number(json.tradeCount   ?? 0);
       out.earliestTradeTimestamp = json.earliestTradeTimestamp ?? null;
-      log.push(`✓ Volume: $${out.volumeTraded.toLocaleString(undefined,{maximumFractionDigits:2})} (${out.tradeCount} trades)`);
+      const src = json.source ? ` [${json.source}]` : "";
+      log.push(`✓ Volume: $${out.volumeTraded.toLocaleString(undefined,{maximumFractionDigits:2})}${out.tradeCount ? ` (${out.tradeCount} trades)` : ""}${src}`);
     } catch(e) { out.volumeTraded = null; log.push(`✗ Volume: ${e.message}`); }
 
     // 3. Portfolio + PnL (from positions with CORRECT field names)
